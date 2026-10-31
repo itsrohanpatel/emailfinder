@@ -1,6 +1,7 @@
 import React from 'react';
 import { useAppStore } from '../Store';
 import { PermutationMode } from '../utils/permutation';
+import { Sliders, ShieldCheck, Cpu, Database, RotateCcw } from 'lucide-react';
 
 export function SettingsPanel() {
   const {
@@ -13,13 +14,17 @@ export function SettingsPanel() {
 
   return (
     <section>
-      <h2 className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-3">
-        Engine & Cost Settings
-      </h2>
+      <div className="flex items-center gap-1.5 mb-3">
+        <Sliders className="w-3.5 h-3.5 text-slate-400" />
+        <h2 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+          Engine & Cost Controls
+        </h2>
+      </div>
+
       <div className="space-y-4">
-        {/* Permutation Mode */}
-        <div>
-          <label className="block text-xs font-medium text-slate-700 mb-1">
+        {/* Permutation Strategy */}
+        <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-2xs">
+          <label className="block text-xs font-semibold text-slate-800 mb-1">
             Permutation Strategy
           </label>
           <select
@@ -28,23 +33,26 @@ export function SettingsPanel() {
             onChange={e =>
               setSettings(s => ({ ...s, patternMode: e.target.value as PermutationMode }))
             }
-            className="w-full bg-white border border-slate-200 rounded px-2.5 py-1.5 text-xs font-sans text-slate-800 focus:outline-none focus:border-blue-500 shadow-xs cursor-pointer"
+            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-sans text-slate-800 focus:bg-white focus:outline-none focus:border-blue-500 shadow-2xs cursor-pointer"
           >
-            <option value="near_full">Near-Full: Top 8 (98.9% Hit Rate, 85% Cost Saved)</option>
-            <option value="lean">Lean: Top 4 (86.7% Hit Rate, Fastest)</option>
+            <option value="near_full">Near-Full: Top 8 (98.9% Coverage, 85% Savings)</option>
+            <option value="lean">Lean: Top 4 (86.7% Coverage, Fastest)</option>
             <option value="exhaustive">Exhaustive: All 14 Patterns</option>
           </select>
-          <span className="text-[10px] text-slate-400 mt-1 block">
-            Near-Full finds 98.9% of emails with sequential early stop.
+          <span className="text-[11px] text-slate-400 mt-1.5 block leading-tight">
+            Near-Full discovers 98.9% of emails with sequential early stop.
           </span>
         </div>
 
         {/* DNS MX Pre-Check Toggle */}
-        <div className="flex items-center justify-between pt-1">
+        <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between gap-2">
           <div>
-            <div className="text-xs text-slate-700 font-medium">Free DNS MX Pre-Check</div>
-            <div className="text-[10px] text-slate-400">
-              Skips dead domains via free DoH (saves $0.00 on invalid domains)
+            <div className="text-xs font-semibold text-slate-800 flex items-center gap-1">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Free DNS MX Pre-Check</span>
+            </div>
+            <div className="text-[11px] text-slate-400 mt-0.5 leading-tight">
+              Bails out on dead domains via free Google DoH ($0 cost)
             </div>
           </div>
           <button
@@ -53,7 +61,7 @@ export function SettingsPanel() {
             onClick={() =>
               setSettings(s => ({ ...s, enableDnsPreCheck: !s.enableDnsPreCheck }))
             }
-            className={`w-9 h-5 rounded-full relative transition-colors cursor-pointer shrink-0 ml-2 ${
+            className={`w-9 h-5 rounded-full relative transition-colors cursor-pointer shrink-0 ml-1 ${
               settings.enableDnsPreCheck ? 'bg-blue-600' : 'bg-slate-300'
             }`}
           >
@@ -65,17 +73,20 @@ export function SettingsPanel() {
           </button>
         </div>
 
-        {/* Concurrency */}
-        <div>
-          <div className="flex justify-between items-center mb-1">
-            <label className="text-xs font-medium text-slate-700">Concurrency (Workers)</label>
-            <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-1.5 py-0.2 rounded">
-              {settings.concurrency}
+        {/* Concurrency Slider */}
+        <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-2xs">
+          <div className="flex justify-between items-center mb-1.5">
+            <label className="text-xs font-semibold text-slate-800 flex items-center gap-1">
+              <Cpu className="w-3.5 h-3.5 text-blue-600" />
+              <span>Parallel Workers</span>
+            </label>
+            <span className="text-xs font-mono font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200/60 tabular-nums">
+              {settings.concurrency} {settings.concurrency === 1 ? 'thread' : 'threads'}
             </span>
           </div>
           <input
             type="range"
-            className="w-full accent-blue-600"
+            className="w-full accent-blue-600 cursor-pointer"
             value={settings.concurrency}
             min="1"
             max="15"
@@ -87,15 +98,17 @@ export function SettingsPanel() {
               }))
             }
           />
-          <div className="flex justify-between text-[10px] text-slate-400 font-mono">
+          <div className="flex justify-between text-[10px] text-slate-400 font-mono mt-1">
             <span>1 worker</span>
             <span>15 max parallel</span>
           </div>
         </div>
 
-        {/* Delay */}
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-slate-700">Worker Delay (ms)</label>
+        {/* Worker Delay */}
+        <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-2xs">
+          <label className="block text-xs font-semibold text-slate-800 mb-1">
+            Worker Delay (ms)
+          </label>
           <input
             type="number"
             min={0}
@@ -108,21 +121,26 @@ export function SettingsPanel() {
                 delayMs: Math.max(0, parseInt(e.target.value) || 0),
               }))
             }
-            className="w-full bg-white border border-slate-200 rounded px-2.5 py-1 text-xs font-mono focus:outline-none focus:border-blue-500 shadow-xs"
+            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-mono text-slate-800 focus:bg-white focus:outline-none focus:border-blue-500 shadow-2xs"
           />
+          <span className="text-[10px] text-slate-400 mt-1 block">
+            Pause between consecutive calls per worker.
+          </span>
         </div>
 
         {/* Re-verify Existing */}
-        <div className="flex items-center justify-between pt-1">
+        <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between gap-2">
           <div>
-            <div className="text-xs text-slate-700 font-medium">Re-verify existing</div>
-            <div className="text-[10px] text-slate-400">Re-checks rows with existing emails</div>
+            <div className="text-xs font-semibold text-slate-800">Re-verify existing</div>
+            <div className="text-[11px] text-slate-400 mt-0.5 leading-tight">
+              Re-checks rows that already contain an email
+            </div>
           </div>
           <button
             type="button"
             disabled={isProcessing}
             onClick={() => setSettings(s => ({ ...s, reverifyAll: !s.reverifyAll }))}
-            className={`w-9 h-5 rounded-full relative transition-colors cursor-pointer shrink-0 ml-2 ${
+            className={`w-9 h-5 rounded-full relative transition-colors cursor-pointer shrink-0 ml-1 ${
               settings.reverifyAll ? 'bg-blue-600' : 'bg-slate-300'
             }`}
           >
@@ -135,26 +153,26 @@ export function SettingsPanel() {
         </div>
 
         {/* Domain Pattern Memory Status */}
-        <div className="pt-2 border-t border-slate-200">
+        <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-2xs">
           <div className="flex items-center justify-between text-xs mb-1">
-            <span className="text-slate-600 font-medium">Domain Memory Cache</span>
-            <span className="font-mono text-emerald-600 font-bold bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-100">
-              {learnedDomainsCount} companies
+            <span className="text-slate-800 font-semibold flex items-center gap-1">
+              <Database className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Domain Cache</span>
+            </span>
+            <span className="font-mono text-indigo-700 font-bold bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-200/60 text-[10px] tabular-nums">
+              {learnedDomainsCount} domains
             </span>
           </div>
-          <div className="text-[10px] text-slate-400 mb-2">
-            Learned company email formats are saved to test next employees on Call 1.
+          <div className="text-[11px] text-slate-500 mb-2 leading-relaxed">
+            Corporate email patterns are cached locally to test future coworkers on Call #1 (94% savings).
           </div>
           {learnedDomainsCount > 0 && !isProcessing && (
             <button
-              onClick={() => {
-                if (window.confirm('Clear all learned company email patterns?')) {
-                  clearDomainCache();
-                }
-              }}
-              className="text-[10px] text-slate-500 hover:text-red-600 font-semibold uppercase tracking-wider underline cursor-pointer"
+              onClick={clearDomainCache}
+              className="text-[11px] text-slate-500 hover:text-rose-600 font-medium transition-colors flex items-center gap-1 cursor-pointer pt-1"
             >
-              Reset Domain Patterns
+              <RotateCcw className="w-3 h-3" />
+              <span>Reset Domain Cache</span>
             </button>
           )}
         </div>

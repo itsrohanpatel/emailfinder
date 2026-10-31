@@ -2,17 +2,25 @@ import React, { useRef, useState } from 'react';
 import Papa from 'papaparse';
 import { useAppStore } from '../Store';
 import { Contact } from '../types';
-import { Upload } from 'lucide-react';
+import { Upload, Sparkles, FileSpreadsheet, Check, AlertCircle } from 'lucide-react';
 import { normalizeDomain } from '../utils/permutation';
 
+// Pre-packaged realistic sample dataset for zero-friction 1-click testing
+const SAMPLE_APOLLO_CSV = `First Name,Last Name,Company,Website,Title
+Brian,Chesky,Airbnb,airbnb.com,CEO & Co-Founder
+Patrick,Collison,Stripe,stripe.com,CEO & Co-Founder
+Marc,Benioff,Salesforce,salesforce.com,Chair & CEO
+Stewart,Butterfield,Slack,slack.com,Founder
+Dylan,Field,Figma,figma.com,CEO & Co-Founder`;
+
 export function CsvUpload() {
-  const { setContacts, settings } = useAppStore();
+  const { setContacts, settings, showToast } = useAppStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [dupCount, setDupCount] = useState<number | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 
-  const processData = (data: any[]) => {
+  const processData = (data: any[], sourceName?: string) => {
     if (!data || data.length === 0) {
       setError('CSV file is empty or could not be parsed.');
       return;
@@ -34,7 +42,6 @@ export function CsvUpload() {
         const idx = lowerHeaders.indexOf(target);
         if (idx !== -1) return cleanHeaders[idx];
       }
-
       for (let i = 0; i < lowerHeaders.length; i++) {
         const h = lowerHeaders[i];
         if (
@@ -163,6 +170,14 @@ export function CsvUpload() {
     setContacts(newContacts);
     setDupCount(duplicates);
     setError(null);
+
+    showToast({
+      type: 'success',
+      title: 'CSV Imported Successfully',
+      description: `${newContacts.length} contacts loaded ${
+        duplicates > 0 ? `(${duplicates} duplicate rows filtered)` : ''
+      }`,
+    });
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -173,11 +188,24 @@ export function CsvUpload() {
       header: true,
       skipEmptyLines: true,
       complete: results => {
-        processData(results.data);
+        processData(results.data, file.name);
         if (fileInputRef.current) fileInputRef.current.value = '';
       },
       error: err => {
         setError('Error parsing CSV: ' + err.message);
+      },
+    });
+  };
+
+  const loadSampleData = () => {
+    Papa.parse(SAMPLE_APOLLO_CSV, {
+      header: true,
+      skipEmptyLines: true,
+      complete: results => {
+        processData(results.data, 'demo-apollo.csv');
+      },
+      error: err => {
+        setError('Error loading sample data: ' + err.message);
       },
     });
   };
@@ -197,7 +225,7 @@ export function CsvUpload() {
       Papa.parse(file, {
         header: true,
         skipEmptyLines: true,
-        complete: results => processData(results.data),
+        complete: results => processData(results.data, file.name),
         error: err => setError('Error parsing CSV: ' + err.message),
       });
     } else {
@@ -206,26 +234,43 @@ export function CsvUpload() {
   };
 
   return (
-    <div className="w-full flex flex-col items-center justify-center py-8">
+    <div className="w-full flex flex-col items-center justify-center py-6">
+      {/* Drag & Drop Container */}
       <div
-        className={`w-full max-w-xl border-2 border-dashed rounded-lg bg-slate-50 p-10 text-center transition-colors cursor-pointer ${
-          isDragging ? 'border-blue-500 bg-blue-50/50' : 'border-slate-300 hover:border-slate-400'
+        className={`w-full max-w-xl border-2 border-dashed rounded-2xl bg-white p-8 text-center transition-all duration-150 cursor-pointer shadow-xs ${
+          isDragging
+            ? 'border-blue-500 bg-blue-50/50 scale-[1.01]'
+            : 'border-slate-300 hover:border-slate-400 hover:bg-slate-50/50'
         }`}
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         onDrop={onDrop}
         onClick={() => fileInputRef.current?.click()}
       >
-        <Upload className="mx-auto h-10 w-10 text-blue-500 mb-3" />
-        <h3 className="text-sm font-bold uppercase tracking-wider text-slate-800">
+        <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto mb-3 border border-blue-100 shadow-xs">
+          <Upload className="h-6 w-6" />
+        </div>
+        <h3 className="text-sm font-bold text-slate-800 tracking-tight">
           Upload Contacts CSV
         </h3>
         <p className="mt-1 text-xs text-slate-500">
-          Drag and drop your CSV file here, or click to browse.
+          Drag and drop your export from Apollo, LinkedIn, or Hubspot, or click to browse.
         </p>
-        <div className="mt-3 inline-flex items-center gap-2 px-3 py-1 bg-slate-200/80 rounded text-[10px] uppercase font-mono tracking-wider text-slate-600">
-          Required Columns: (Name or First Name) + (Website/Domain or Email)
+
+        <div className="mt-4 flex flex-wrap items-center justify-center gap-1.5">
+          <span className="px-2 py-0.5 bg-slate-100 rounded text-[10px] font-mono font-medium text-slate-600 border border-slate-200">
+            First Name
+          </span>
+          <span className="text-slate-400 text-xs">+</span>
+          <span className="px-2 py-0.5 bg-slate-100 rounded text-[10px] font-mono font-medium text-slate-600 border border-slate-200">
+            Last Name
+          </span>
+          <span className="text-slate-400 text-xs">+</span>
+          <span className="px-2 py-0.5 bg-slate-100 rounded text-[10px] font-mono font-medium text-slate-600 border border-slate-200">
+            Company Domain / Website
+          </span>
         </div>
+
         <input
           type="file"
           accept=".csv,text/csv"
@@ -235,16 +280,39 @@ export function CsvUpload() {
         />
       </div>
 
+      {/* 1-Click Demo Shortcut */}
+      <div className="mt-4 flex items-center gap-2">
+        <span className="text-xs text-slate-400">or test immediately:</span>
+        <button
+          onClick={loadSampleData}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 transition-colors shadow-2xs active:scale-[0.98] cursor-pointer"
+        >
+          <Sparkles className="w-3.5 h-3.5 text-blue-600" />
+          <span>Load 5 Demo Apollo Leads</span>
+        </button>
+      </div>
+
+      {/* Auto-deduplicated notice */}
       {dupCount !== null && dupCount > 0 && (
-        <div className="mt-3 w-full max-w-xl text-xs font-mono text-emerald-800 bg-emerald-50 border border-emerald-200 p-2.5 rounded flex items-center justify-between">
-          <span>✓ Auto-deduplicated: <b>{dupCount}</b> duplicate rows removed on import</span>
-          <button onClick={() => setDupCount(null)} className="text-emerald-600 hover:text-emerald-900 font-bold ml-2">×</button>
+        <div className="mt-4 w-full max-w-xl text-xs font-mono text-emerald-800 bg-emerald-50 border border-emerald-200/80 p-3 rounded-xl flex items-center justify-between">
+          <span className="flex items-center gap-1.5">
+            <Check className="w-4 h-4 text-emerald-600" />
+            Auto-deduplicated: <b>{dupCount}</b> duplicate rows removed on import.
+          </span>
+          <button
+            onClick={() => setDupCount(null)}
+            className="text-emerald-700 hover:text-emerald-950 font-bold ml-2 cursor-pointer text-sm"
+          >
+            ×
+          </button>
         </div>
       )}
 
+      {/* Error Banner */}
       {error && (
-        <div className="mt-4 w-full max-w-xl text-xs font-mono text-red-600 bg-red-50 border border-red-200 p-3 rounded">
-          [ERROR] {error}
+        <div className="mt-4 w-full max-w-xl text-xs font-mono text-rose-700 bg-rose-50 border border-rose-200/80 p-3 rounded-xl flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+          <span>{error}</span>
         </div>
       )}
     </div>

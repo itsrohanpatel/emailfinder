@@ -2,12 +2,14 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAppStore } from '../Store';
 import { checkApiKey } from '../utils/apify';
 import { ApiKey } from '../types';
+import { Key, Plus, RefreshCw, Eye, EyeOff, Trash2, CheckCircle2, AlertCircle } from 'lucide-react';
 
 export function KeyManager() {
-  const { apiKeys, setApiKeys } = useAppStore();
+  const { apiKeys, setApiKeys, showToast } = useAppStore();
   const [newKeys, setNewKeys] = useState('');
   const [isChecking, setIsChecking] = useState(false);
   const [showAdd, setShowAdd] = useState(apiKeys.length === 0);
+  const [showTokens, setShowTokens] = useState(false);
 
   const checkKeys = useCallback(
     async (keysToCheck: ApiKey[]) => {
@@ -81,16 +83,30 @@ export function KeyManager() {
 
     setNewKeys('');
     setShowAdd(false);
+
+    showToast({
+      type: 'success',
+      title: 'API Keys Added',
+      description: `${uniqueTokens.length} token(s) configured for automatic rotation.`,
+    });
   };
 
   const removeKey = (token: string) => {
     setApiKeys(prev => prev.filter(k => k.token !== token));
+    showToast({
+      type: 'info',
+      title: 'Key Removed',
+      description: 'The selected API key was removed from browser storage.',
+    });
   };
 
   const clearAllKeys = () => {
-    if (window.confirm('Remove all API keys from browser storage?')) {
-      setApiKeys([]);
-    }
+    setApiKeys([]);
+    showToast({
+      type: 'info',
+      title: 'All Keys Cleared',
+      description: 'All Apify API keys were removed.',
+    });
   };
 
   const activeCount = apiKeys.filter(k => k.status === 'active' || k.status === 'unchecked').length;
@@ -98,43 +114,45 @@ export function KeyManager() {
   return (
     <section>
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-          API Key Rotation
+        <h2 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+          <Key className="w-3.5 h-3.5 text-slate-400" />
+          <span>Apify Key Rotation</span>
         </h2>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           {apiKeys.length > 0 && (
-            <span className="text-[10px] font-mono font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-              {activeCount} ACTIVE
+            <span className="text-[10px] font-mono font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+              {activeCount} READY
             </span>
           )}
           <button
             onClick={() => setShowAdd(!showAdd)}
-            className="text-[10px] text-blue-600 font-semibold hover:underline"
+            className="text-[11px] text-blue-600 font-semibold hover:text-blue-700 cursor-pointer flex items-center gap-0.5 active:scale-[0.98]"
           >
-            {showAdd ? 'CANCEL' : '+ ADD KEY'}
+            <Plus className="w-3 h-3" />
+            <span>{showAdd ? 'Close' : 'Add'}</span>
           </button>
         </div>
       </div>
 
-      <div className="space-y-2">
+      <div className="space-y-2.5">
         {showAdd && (
-          <div className="mb-4 bg-white p-2.5 rounded border border-blue-200 shadow-sm">
+          <div className="mb-3 bg-white p-3 rounded-xl border border-blue-200 shadow-sm animate-in fade-in">
             <textarea
               value={newKeys}
               onChange={e => setNewKeys(e.target.value)}
               placeholder="Paste Apify API tokens (one per line)..."
-              className="w-full text-xs font-mono bg-slate-50 border border-slate-200 rounded p-2 focus:outline-none focus:border-blue-500 min-h-[60px]"
+              className="w-full text-xs font-mono bg-slate-50 border border-slate-200 rounded-lg p-2.5 focus:bg-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20 min-h-[65px] transition-all"
             />
             <div className="flex gap-2 mt-2">
               <button
                 onClick={handleAddKeys}
-                className="flex-1 bg-slate-900 text-white text-[10px] font-bold uppercase tracking-wider py-1.5 rounded hover:bg-black"
+                className="flex-1 bg-slate-900 hover:bg-black text-white text-xs font-semibold py-1.5 rounded-lg transition-colors cursor-pointer active:scale-[0.98]"
               >
-                Save Keys
+                Save Tokens
               </button>
               <button
                 onClick={() => setShowAdd(false)}
-                className="px-3 border border-slate-200 text-slate-600 text-[10px] font-bold uppercase tracking-wider py-1.5 rounded hover:bg-slate-50"
+                className="px-3 border border-slate-200 text-slate-600 text-xs font-medium py-1.5 rounded-lg hover:bg-slate-50 transition-colors cursor-pointer active:scale-[0.98]"
               >
                 Cancel
               </button>
@@ -143,39 +161,52 @@ export function KeyManager() {
         )}
 
         {apiKeys.length === 0 && !showAdd && (
-          <div className="text-xs text-slate-400 italic bg-white p-3 rounded border border-dashed border-slate-200 text-center">
-            No keys saved. Click <b>+ ADD KEY</b> to add your Apify token.
+          <div className="text-xs text-slate-500 bg-white p-3.5 rounded-xl border border-dashed border-slate-300 text-center shadow-2xs">
+            <p className="font-medium text-slate-700">No API Keys Connected</p>
+            <p className="text-[11px] text-slate-400 mt-1">
+              Add your Apify personal token to start verifying emails at $0.89/1k.
+            </p>
+            <button
+              onClick={() => setShowAdd(true)}
+              className="mt-2.5 inline-flex items-center gap-1 px-3 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold rounded-lg text-xs transition-colors cursor-pointer"
+            >
+              <Plus className="w-3 h-3" />
+              <span>Connect Apify Token</span>
+            </button>
           </div>
         )}
 
         {apiKeys.map(key => {
           const isExhausted = key.status === 'exhausted' || key.status === 'invalid';
-          const masked =
-            key.token.length > 8
-              ? `apify_...${key.token.slice(-4)}`
-              : `key_...${key.token.slice(-2)}`;
+          const displayedToken = showTokens
+            ? key.token
+            : key.token.length > 8
+            ? `apify_api_...${key.token.slice(-4)}`
+            : `••••••••`;
 
           return (
             <div
               key={key.token}
-              className={`p-2.5 border rounded shadow-sm transition-opacity ${
+              className={`p-3 border rounded-xl shadow-2xs transition-all ${
                 isExhausted
-                  ? 'bg-slate-100 border-slate-200 grayscale opacity-60'
-                  : 'bg-white border-slate-200'
+                  ? 'bg-slate-100/70 border-slate-200 grayscale opacity-75'
+                  : 'bg-white border-slate-200 hover:border-slate-300'
               }`}
             >
               <div className="flex justify-between items-center text-xs mb-1 font-mono">
-                <span className="text-slate-600 font-medium">{masked}</span>
-                <div className="flex items-center gap-1.5">
+                <span className="text-slate-700 font-medium truncate max-w-[150px]">
+                  {displayedToken}
+                </span>
+                <div className="flex items-center gap-1.5 shrink-0">
                   <span
-                    className={`text-[9px] uppercase px-1.5 py-0.5 rounded font-bold ${
+                    className={`text-[9px] uppercase px-2 py-0.5 rounded-full font-bold tracking-wider ${
                       key.status === 'active'
-                        ? 'bg-emerald-100 text-emerald-800'
+                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                         : key.status === 'invalid'
-                        ? 'bg-red-100 text-red-700'
+                        ? 'bg-rose-50 text-rose-700 border border-rose-200'
                         : key.status === 'exhausted'
-                        ? 'bg-amber-100 text-amber-800'
-                        : 'bg-slate-100 text-slate-500'
+                        ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                        : 'bg-slate-100 text-slate-500 border border-slate-200'
                     }`}
                   >
                     {key.status}
@@ -183,40 +214,57 @@ export function KeyManager() {
                   <button
                     onClick={() => removeKey(key.token)}
                     title="Remove key"
-                    className="text-slate-400 hover:text-red-500 text-xs px-1"
+                    className="text-slate-400 hover:text-rose-600 transition-colors p-0.5 rounded cursor-pointer"
                   >
-                    ×
+                    <Trash2 className="w-3 h-3" />
                   </button>
                 </div>
               </div>
 
-              {key.label && (
-                <div className="text-[10px] text-slate-400 truncate">{key.label}</div>
-              )}
+              <div className="flex items-center justify-between text-[11px] text-slate-400">
+                <span className="truncate">{key.label || 'Apify Token'}</span>
+                {key.creditsRemaining !== null && (
+                  <span className="font-mono text-slate-500 font-medium">
+                    ${key.creditsRemaining.toFixed(2)} USD
+                  </span>
+                )}
+              </div>
             </div>
           );
         })}
 
         {apiKeys.length > 0 && !isChecking && (
-          <div className="flex justify-between items-center pt-2">
+          <div className="flex justify-between items-center pt-1.5 text-xs">
             <button
-              onClick={checkAllKeys}
-              className="text-[10px] text-blue-600 hover:text-blue-800 font-semibold uppercase tracking-wider"
+              onClick={() => setShowTokens(!showTokens)}
+              className="text-slate-500 hover:text-slate-800 flex items-center gap-1 font-medium transition-colors cursor-pointer"
             >
-              Refresh Status
+              {showTokens ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+              <span>{showTokens ? 'Mask' : 'Reveal'}</span>
             </button>
-            <button
-              onClick={clearAllKeys}
-              className="text-[10px] text-red-500 hover:text-red-700 font-semibold uppercase tracking-wider"
-            >
-              Clear All
-            </button>
+
+            <div className="flex items-center gap-3">
+              <button
+                onClick={checkAllKeys}
+                className="text-blue-600 hover:text-blue-800 flex items-center gap-1 font-semibold transition-colors cursor-pointer"
+              >
+                <RefreshCw className="w-3 h-3" />
+                <span>Refresh</span>
+              </button>
+              <button
+                onClick={clearAllKeys}
+                className="text-slate-400 hover:text-rose-600 font-medium transition-colors cursor-pointer"
+              >
+                Clear All
+              </button>
+            </div>
           </div>
         )}
 
         {isChecking && (
-          <div className="w-full mt-2 text-center text-[10px] text-slate-400 uppercase tracking-wider animate-pulse">
-            Checking token status...
+          <div className="w-full mt-2 text-center text-[11px] text-slate-500 flex items-center justify-center gap-1.5 font-medium animate-pulse">
+            <RefreshCw className="w-3 h-3 animate-spin" />
+            <span>Checking Apify balance...</span>
           </div>
         )}
       </div>

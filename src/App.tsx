@@ -6,6 +6,8 @@ import { KeyManager } from './components/KeyManager';
 import { Controls } from './components/Controls';
 import { ResultsTable } from './components/ResultsTable';
 import { SettingsPanel } from './components/Settings';
+import { ToastContainer } from './components/Toast';
+import { Zap, Search, FileSpreadsheet, ShieldCheck, Cpu } from 'lucide-react';
 
 function formatRemainingTime(seconds: number | null, isProcessing: boolean): string {
   if (!isProcessing) return '--m --s';
@@ -19,91 +21,130 @@ function formatRemainingTime(seconds: number | null, isProcessing: boolean): str
 }
 
 function AppContent() {
-  const { isProcessing, isPaused, contacts, estimatedRemainingSec } = useAppStore();
+  const { isProcessing, isPaused, contacts, estimatedRemainingSec, toasts, dismissToast, settings } =
+    useAppStore();
   const [activeTab, setActiveTab] = useState<'single' | 'bulk'>('single');
-  const engineStatus = isProcessing ? 'ACTIVE' : isPaused ? 'PAUSED' : 'IDLE';
+  const engineStatus = isProcessing ? 'PROCESSING' : isPaused ? 'PAUSED' : 'READY';
 
   return (
     <div className="flex flex-col h-screen bg-[#f8fafc] font-sans text-slate-900 overflow-hidden">
-      <header className="flex items-center justify-between px-6 py-3 bg-[#0f172a] text-white shrink-0">
+      {/* Toast Notification Layer */}
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+
+      {/* SaaS Obsidian Glass Header */}
+      <header className="flex items-center justify-between px-6 py-2.5 bg-[#090d16] text-white shrink-0 border-b border-slate-800/80 shadow-md">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-blue-600 rounded flex items-center justify-center font-bold text-lg italic shadow-sm">
-            V
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-blue-600 via-indigo-600 to-sky-400 p-[1px] shadow-sm flex items-center justify-center">
+            <div className="w-full h-full bg-[#090d16] rounded-[7px] flex items-center justify-center">
+              <Zap className="w-4 h-4 text-blue-400" />
+            </div>
           </div>
-          <h1 className="text-lg font-semibold tracking-tight">
-            VeriFlow <span className="text-blue-400">Verifier</span>
-          </h1>
-          <div className="ml-2 px-2 py-0.5 bg-slate-800 rounded text-[10px] uppercase font-mono tracking-widest text-slate-400 border border-slate-700">
-            v1.3.1-production
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-sm font-semibold tracking-tight text-white flex items-center gap-1.5">
+                VeriFlow
+                <span className="text-[11px] font-normal text-slate-400">| Email Engine</span>
+              </h1>
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                PROD
+              </span>
+            </div>
           </div>
         </div>
 
-        {/* Tab switcher */}
-        <div className="flex items-center bg-slate-800 p-1 rounded-lg border border-slate-700">
+        {/* Tab Switcher */}
+        <div className="flex items-center bg-slate-900/90 p-0.5 rounded-lg border border-slate-800">
           <button
             onClick={() => setActiveTab('single')}
-            className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors flex items-center gap-1.5 cursor-pointer ${
+            className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all flex items-center gap-1.5 cursor-pointer active:scale-[0.98] ${
               activeTab === 'single'
-                ? 'bg-blue-600 text-white shadow-xs'
-                : 'text-slate-300 hover:text-white'
+                ? 'bg-blue-600 text-white shadow-xs font-semibold'
+                : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            <span>🔍</span> Single Finder
+            <Search className="w-3.5 h-3.5" />
+            <span>Single Finder</span>
           </button>
           <button
             onClick={() => setActiveTab('bulk')}
-            className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors flex items-center gap-1.5 cursor-pointer ${
+            className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all flex items-center gap-1.5 cursor-pointer active:scale-[0.98] ${
               activeTab === 'bulk'
-                ? 'bg-blue-600 text-white shadow-xs'
-                : 'text-slate-300 hover:text-white'
+                ? 'bg-blue-600 text-white shadow-xs font-semibold'
+                : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            <span>📂</span> Bulk CSV ({contacts.length})
+            <FileSpreadsheet className="w-3.5 h-3.5" />
+            <span>Bulk CSV</span>
+            {contacts.length > 0 && (
+              <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-blue-500/20 text-blue-300">
+                {contacts.length}
+              </span>
+            )}
           </button>
         </div>
 
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2 px-3 py-1 bg-slate-800 rounded-full border border-slate-700">
-            <div
-              className={`w-2 h-2 rounded-full ${
+        {/* Engine Status Pill */}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 px-3 py-1 bg-slate-900 rounded-full border border-slate-800 text-xs font-mono">
+            <span className="relative flex h-2 w-2">
+              {isProcessing && (
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              )}
+              <span
+                className={`relative inline-flex rounded-full h-2 w-2 ${
+                  isProcessing
+                    ? 'bg-emerald-500'
+                    : isPaused
+                    ? 'bg-amber-400'
+                    : 'bg-slate-500'
+                }`}
+              ></span>
+            </span>
+            <span
+              className={
                 isProcessing
-                  ? 'bg-emerald-400 animate-pulse'
+                  ? 'text-emerald-400 font-semibold'
                   : isPaused
-                  ? 'bg-amber-400'
-                  : 'bg-slate-500'
-              }`}
-            ></div>
-            <span className="text-xs font-mono text-slate-300">ENGINE: {engineStatus}</span>
+                  ? 'text-amber-400'
+                  : 'text-slate-400'
+              }
+            >
+              {engineStatus}
+            </span>
           </div>
         </div>
       </header>
 
+      {/* Main Workspace Layout */}
       <div className="flex flex-1 overflow-hidden">
-        <aside className="w-72 bg-slate-50 border-r border-slate-200 flex flex-col shrink-0 overflow-y-auto">
+        {/* Left Control Sidebar */}
+        <aside className="w-76 bg-slate-50/90 border-r border-slate-200/90 flex flex-col shrink-0 overflow-y-auto">
           <div className="p-4 flex flex-col gap-6">
             <KeyManager />
             <SettingsPanel />
           </div>
         </aside>
 
+        {/* Main Workspace Body */}
         <main className="flex-1 flex flex-col min-w-0 bg-white overflow-hidden">
           {activeTab === 'single' ? (
-            <div className="flex-1 overflow-y-auto p-6 bg-slate-50/50">
+            <div className="flex-1 overflow-y-auto p-6 bg-slate-50/40">
               <SingleEmailFinder />
               {contacts.length > 0 && (
                 <div className="max-w-3xl mx-auto w-full mt-8 pt-6 border-t border-slate-200">
                   <div className="flex items-center justify-between mb-3">
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-600">
-                      Bulk Queue ({contacts.length} contacts)
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-600 flex items-center gap-2">
+                      <FileSpreadsheet className="w-3.5 h-3.5 text-blue-600" />
+                      Bulk Queue ({contacts.length} loaded)
                     </h4>
                     <button
                       onClick={() => setActiveTab('bulk')}
-                      className="text-xs text-blue-600 font-semibold hover:underline cursor-pointer"
+                      className="text-xs text-blue-600 font-semibold hover:text-blue-700 hover:underline cursor-pointer flex items-center gap-1"
                     >
-                      Open Bulk View →
+                      Open Full Bulk View →
                     </button>
                   </div>
-                  <div className="bg-white rounded-lg border border-slate-200 overflow-hidden shadow-xs h-72 flex flex-col">
+                  <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs h-72 flex flex-col">
                     <ResultsTable />
                   </div>
                 </div>
@@ -111,7 +152,7 @@ function AppContent() {
             </div>
           ) : (
             <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-              <div className="p-6 border-b border-slate-200 bg-slate-50/50 shrink-0">
+              <div className="p-6 border-b border-slate-200/80 bg-slate-50/40 shrink-0">
                 {contacts.length === 0 ? <CsvUpload /> : <Controls />}
               </div>
               <div className="flex-1 overflow-hidden bg-white flex flex-col">
@@ -122,20 +163,26 @@ function AppContent() {
         </main>
       </div>
 
-      <footer className="px-6 py-2 bg-slate-50 border-t border-slate-200 flex justify-between items-center shrink-0">
-        <div className="flex gap-4 text-[10px] font-mono text-slate-400">
-          <span>MODE: {activeTab.toUpperCase()}</span>
-          <span>
-            ESTIMATED_REMAINING:{' '}
-            <span className="text-slate-600 font-bold">
-              {formatRemainingTime(estimatedRemainingSec, isProcessing)}
-            </span>
+      {/* Global Status Footer */}
+      <footer className="px-6 py-2 bg-slate-50 border-t border-slate-200/80 flex justify-between items-center shrink-0">
+        <div className="flex gap-4 text-[11px] font-mono text-slate-500">
+          <span className="flex items-center gap-1">
+            <Cpu className="w-3 h-3 text-slate-400" />
+            WORKERS: <b className="text-slate-700">{settings.concurrency}</b>
           </span>
-          <span>STORAGE: LOCALSTORAGE + IN-MEMORY</span>
+          <span>
+            ETA:{' '}
+            <b className="text-slate-700 tabular-nums">
+              {formatRemainingTime(estimatedRemainingSec, isProcessing)}
+            </b>
+          </span>
+          <span>
+            STRATEGY: <b className="text-slate-700 uppercase">{settings.patternMode.replace('_', '-')}</b>
+          </span>
         </div>
-        <div className="text-[10px] text-slate-500">
-          Client-Side SPA • Powered by Apify Actor{' '}
-          <span className="text-slate-800 font-semibold">j4YDbwiXnPFzYeF5w</span>
+        <div className="flex items-center gap-2 text-[11px] text-slate-500">
+          <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+          <span>Client-Side Sandbox • Zero Server Relay</span>
         </div>
       </footer>
     </div>

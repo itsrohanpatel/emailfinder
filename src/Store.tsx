@@ -7,6 +7,7 @@ import React, {
   useRef,
 } from 'react';
 import { Contact, ApiKey, Settings } from './types';
+import { ToastItem } from './components/Toast';
 import {
   generatePermutations,
   normalizeDomain,
@@ -28,6 +29,7 @@ interface AppState {
   isPaused: boolean;
   estimatedRemainingSec: number | null;
   learnedDomainsCount: number;
+  toasts: ToastItem[];
 }
 
 interface AppContextType extends AppState {
@@ -40,6 +42,8 @@ interface AppContextType extends AppState {
   stopProcessing: () => void;
   clearContacts: () => void;
   clearDomainCache: () => void;
+  showToast: (toast: Omit<ToastItem, 'id'>) => void;
+  dismissToast: (id: string) => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -121,6 +125,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [estimatedRemainingSec, setEstimatedRemainingSec] = useState<number | null>(null);
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+
+  const showToast = useCallback((toast: Omit<ToastItem, 'id'>) => {
+    const id = Math.random().toString(36).substring(2, 9);
+    setToasts(prev => [...prev.slice(-4), { ...toast, id }]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, 4000);
+  }, []);
+
+  const dismissToast = useCallback((id: string) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  }, []);
 
   // Synchronous atomic queue for concurrency
   const queueRef = useRef<number[]>([]);
@@ -177,7 +194,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     domainPatternCache.current.clear();
     localStorage.removeItem(STORAGE_DOMAIN_PATTERNS);
     setLearnedDomainsCount(0);
-  }, []);
+    showToast({
+      type: 'info',
+      title: 'Domain Cache Cleared',
+      description: 'Reset corporate email patterns memory.',
+    });
+  }, [showToast]);
 
   const updateContact = useCallback((id: number, updates: Partial<Contact>) => {
     setContacts(prev => prev.map(c => (c.id === id ? { ...c, ...updates } : c)));
@@ -196,7 +218,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       inRef.status = 'exhausted';
       inRef.creditsRemaining = 0;
     }
-  }, []);
+    showToast({
+      type: 'warning',
+      title: 'API Key Rotated',
+      description: `Key ...${token.slice(-6)} was exhausted or rate-limited. Switched to next key.`,
+    });
+  }, [showToast]);
 
   const getNextActiveKey = useCallback((): ApiKey | null => {
     const currentList = keysRef.current;
@@ -508,12 +535,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         isPaused,
         estimatedRemainingSec,
         learnedDomainsCount,
+        toasts,
         startProcessing,
         pauseProcessing,
         resumeProcessing,
         stopProcessing,
         clearContacts,
         clearDomainCache,
+        showToast,
+        dismissToast,
       }}
     >
       {children}
