@@ -20,6 +20,7 @@ import { checkDomainMx } from './utils/dns';
 const STORAGE_KEYS = 'veriflow_api_keys_v1';
 const STORAGE_SETTINGS = 'veriflow_settings_v1';
 const STORAGE_DOMAIN_PATTERNS = 'veriflow_domain_patterns_v1';
+const STORAGE_CONTACTS = 'veriflow_contacts_v1';
 
 interface AppState {
   contacts: Contact[];
@@ -47,6 +48,19 @@ interface AppContextType extends AppState {
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
+
+function loadInitialContacts(): Contact[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_CONTACTS);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (err) {
+    console.warn('Failed to load contacts from localStorage:', err);
+  }
+  return [];
+}
 
 function loadInitialKeys(): ApiKey[] {
   try {
@@ -118,7 +132,7 @@ function loadInitialDomainPatterns(): Map<string, string> {
 }
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
-  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [contacts, setContacts] = useState<Contact[]>(loadInitialContacts);
   const [apiKeys, setApiKeys] = useState<ApiKey[]>(loadInitialKeys);
   const [settings, setSettings] = useState<Settings>(loadInitialSettings);
 
@@ -126,6 +140,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [isPaused, setIsPaused] = useState(false);
   const [estimatedRemainingSec, setEstimatedRemainingSec] = useState<number | null>(null);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+
+  // Persist contacts to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_CONTACTS, JSON.stringify(contacts));
+    } catch (e) {
+      console.warn('LocalStorage save failed for contacts:', e);
+    }
+  }, [contacts]);
 
   const showToast = useCallback((toast: Omit<ToastItem, 'id'>) => {
     const id = Math.random().toString(36).substring(2, 9);
@@ -371,7 +394,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               setIsPaused(true);
               setIsProcessing(false);
               updateContact(contactId, { status: 'pending' });
-              alert('All API keys are exhausted or invalid. Please add a valid Apify API key.');
+              showToast({
+                type: 'error',
+                title: 'No Active API Keys',
+                description: 'All API keys are exhausted or invalid. Please add a valid Apify API key in the sidebar.',
+              });
               return;
             }
 
@@ -493,6 +520,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (activeWorkersRef.current <= 0 && runIdRef.current === currentRunId) {
         setIsProcessing(false);
         setEstimatedRemainingSec(null);
+        showToast({
+          type: 'success',
+          title: 'Verification Complete',
+          description: 'Finished processing all contacts in queue.',
+        });
       }
     };
 
@@ -520,6 +552,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const clearContacts = useCallback(() => {
     stopProcessing();
     setContacts([]);
+    try {
+      localStorage.removeItem(STORAGE_CONTACTS);
+    } catch (e) {
+      console.warn(e);
+    }
   }, [stopProcessing]);
 
   return (

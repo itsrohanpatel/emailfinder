@@ -6,6 +6,7 @@ import { Play, Pause, Square, Download, Trash2, CheckCircle2, ShieldAlert, Alert
 export function Controls() {
   const {
     contacts,
+    apiKeys,
     isProcessing,
     isPaused,
     startProcessing,
@@ -18,6 +19,20 @@ export function Controls() {
 
   const total = contacts.length;
   if (total === 0) return null;
+
+  const activeKey = apiKeys.find(k => k.status === 'active' || k.status === 'unchecked');
+
+  const handleStart = () => {
+    if (!activeKey) {
+      showToast({
+        type: 'error',
+        title: 'No Active API Key',
+        description: 'Please add a valid Apify API token in the sidebar before starting.',
+      });
+      return;
+    }
+    startProcessing();
+  };
 
   // Single-pass computation for stats
   const { found, notFound, catchAll, noMx, processed, errors } = useMemo(() => {
@@ -206,7 +221,7 @@ export function Controls() {
       <div className="flex flex-wrap items-center gap-2.5 pt-1">
         {!isProcessing && !isPaused && (
           <button
-            onClick={startProcessing}
+            onClick={handleStart}
             disabled={processed === total}
             className="flex-1 min-w-[200px] flex items-center justify-center gap-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:opacity-40 text-white py-2 px-5 rounded-xl font-semibold text-xs transition-all shadow-xs active:scale-[0.98] cursor-pointer"
           >

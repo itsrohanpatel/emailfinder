@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AppProvider, useAppStore } from './Store';
 import { CsvUpload } from './components/CsvUpload';
 import { SingleEmailFinder } from './components/SingleEmailFinder';
@@ -23,7 +23,23 @@ function formatRemainingTime(seconds: number | null, isProcessing: boolean): str
 function AppContent() {
   const { isProcessing, isPaused, contacts, estimatedRemainingSec, toasts, dismissToast, settings } =
     useAppStore();
-  const [activeTab, setActiveTab] = useState<'single' | 'bulk'>('single');
+  const [activeTab, setActiveTab] = useState<'single' | 'bulk'>(() => {
+    try {
+      const saved = localStorage.getItem('veriflow_active_tab_v1');
+      if (saved === 'single' || saved === 'bulk') return saved;
+    } catch (e) {
+      // ignore
+    }
+    return contacts.length > 0 ? 'bulk' : 'single';
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('veriflow_active_tab_v1', activeTab);
+    } catch (e) {
+      // ignore
+    }
+  }, [activeTab]);
   const engineStatus = isProcessing ? 'PROCESSING' : isPaused ? 'PAUSED' : 'READY';
 
   return (
