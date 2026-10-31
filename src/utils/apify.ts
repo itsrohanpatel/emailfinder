@@ -15,29 +15,57 @@ export async function checkApiKey(token: string): Promise<{
   }
 
   try {
-    const userRes = await fetch('https://api.apify.com/v2/users/me', {
-      headers: { Authorization: `Bearer ${token.trim()}` },
-      signal: AbortSignal.timeout(15000),
-    });
+    const [userRes, usageRes] = await Promise.allSettled([
+      fetch('https://api.apify.com/v2/users/me', {
+        headers: { Authorization: `Bearer ${token.trim()}` },
+        signal: AbortSignal.timeout(15000),
+      }),
+      fetch('https://api.apify.com/v2/users/me/usage/monthly', {
+        headers: { Authorization: `Bearer ${token.trim()}` },
+        signal: AbortSignal.timeout(15000),
+      }),
+    ]);
 
-    if (userRes.status === 401) {
+    if (userRes.status !== 'fulfilled') {
+      return { success: false, error: 'Failed connecting to Apify' };
+    }
+
+    if (userRes.value.status === 401) {
       return { success: false, error: 'Invalid or expired API token' };
     }
 
-    if (!userRes.ok) {
-      return { success: false, error: `Apify error: HTTP ${userRes.status}` };
+    if (!userRes.value.ok) {
+      return { success: false, error: `Apify error: HTTP ${userRes.value.status}` };
     }
 
-    const userData = await userRes.json();
+    const userData = await userRes.value.json();
     const plan = userData.data?.plan;
-    const planName = plan?.name || 'Free';
+    const planName = plan?.name || plan?.tier || 'Free';
     const limitUsd = plan?.monthlyUsageCreditsUsd ?? plan?.maxMonthlyUsageUsd ?? null;
+
+    let creditsRemaining: number | null = limitUsd;
+    if (usageRes.status === 'fulfilled' && usageRes.value.ok) {
+      try {
+        const usageData = await usageRes.value.json();
+        const spentUsd =
+          usageData.data?.totalUsageCreditsUsdAfterVolumeDiscount ??
+          usageData.data?.totalUsageCreditsUsdBeforeVolumeDiscount ??
+          0;
+        if (typeof limitUsd === 'number') {
+          creditsRemaining = Math.max(0, limitUsd - spentUsd);
+        }
+      } catch (e) {
+        // Fallback to limitUsd
+      }
+    }
+
+    const isExhausted = creditsRemaining !== null && creditsRemaining <= 0.005;
 
     return {
       success: true,
-      creditsRemaining: limitUsd,
+      creditsRemaining,
       planName,
-      exhausted: false,
+      exhausted: isExhausted,
     };
   } catch (error: any) {
     if (error.name === 'TimeoutError') {
