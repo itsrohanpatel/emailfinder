@@ -1,11 +1,17 @@
 import React, { useState } from 'react';
 import { useAppStore } from '../Store';
-import { generatePermutations } from '../utils/permutation';
+import {
+  generatePermutations,
+  normalizeDomain,
+  detectPattern,
+  generateEmailByPattern,
+} from '../utils/permutation';
 import { verifyEmails } from '../utils/apify';
+import { checkDomainMx } from '../utils/dns';
 import { Contact } from '../types';
 
 export function SingleEmailFinder() {
-  const { apiKeys, setContacts, setApiKeys, contacts } = useAppStore();
+  const { apiKeys, setContacts, setApiKeys, contacts, settings } = useAppStore();
 
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -14,7 +20,7 @@ export function SingleEmailFinder() {
 
   const [isSearching, setIsSearching] = useState(false);
   const [result, setResult] = useState<{
-    status: 'idle' | 'found' | 'not_found' | 'error';
+    status: 'idle' | 'found' | 'not_found' | 'catch_all' | 'no_mx' | 'error';
     email?: string;
     error?: string;
     permutationsTested?: string[];
@@ -44,7 +50,28 @@ export function SingleEmailFinder() {
     setIsSearching(true);
     setResult({ status: 'idle' });
 
-    const perms = generatePermutations(firstName, lastName, website, emailInput);
+    const domain = normalizeDomain(website || emailInput);
+
+    // 1. Free DNS MX Pre-Check
+    if (settings.enableDnsPreCheck && domain && domain.includes('.')) {
+      const mxRes = await checkDomainMx(domain);
+      if (!mxRes.hasMx) {
+        setIsSearching(false);
+        setResult({
+          status: 'no_mx',
+          error: `Domain "${domain}" has no active MX records and cannot receive emails. (0 Apify cost)`,
+        });
+        return;
+      }
+    }
+
+    const perms = generatePermutations(
+      firstName,
+      lastName,
+      website,
+      emailInput,
+      settings.patternMode
+    );
 
     if (perms.length === 0) {
       setIsSearching(false);
@@ -56,57 +83,100 @@ export function SingleEmailFinder() {
     }
 
     try {
-      // Allow trying active keys in order
       const availableKeys = apiKeys.filter(k => k.status === 'active' || k.status === 'unchecked');
-      let searchSuccess = false;
-
-      for (const key of availableKeys) {
-        const res = await verifyEmails(key.token, perms);
-
-        if (res.isExhausted) {
-          setApiKeys(prev =>
-            prev.map(k =>
-              k.token === key.token ? { ...k, status: 'exhausted', creditsRemaining: 0 } : k
-            )
-          );
-          continue; // Try next key
-        }
-
-        if (res.isRateLimit) {
-          continue; // Try next key
-        }
-
-        if (!res.success) {
-          setResult({
-            status: 'error',
-            error: res.error || 'Verification failed.',
-            permutationsTested: perms,
-          });
-          searchSuccess = true;
-          break;
-        }
-
-        if (res.validEmail) {
-          setResult({
-            status: 'found',
-            email: res.validEmail,
-            permutationsTested: perms,
-          });
-        } else {
-          setResult({
-            status: 'not_found',
-            permutationsTested: perms,
-          });
-        }
-        searchSuccess = true;
-        break;
-      }
-
-      if (!searchSuccess) {
+      if (availableKeys.length === 0) {
         setResult({
           status: 'error',
-          error: 'All available API keys are exhausted or rate limited. Please check your tokens.',
-          permutationsTested: perms,
+          error: 'No active API keys available.',
+        });
+        return;
+      }
+
+      let currentKeyIdx = 0;
+      let foundEmail: string | undefined;
+      let isCatchAll = false;
+      let isUnknown = false;
+      let lastErr: string | undefined;
+      const tested: string[] = [];
+
+      // Sequential Stop-on-Match
+      for (const candidate of perms) {
+        let retries = 0;
+        let success = false;
+
+        while (retries < 3 && !success && currentKeyIdx < availableKeys.length) {
+          const currentKey = availableKeys[currentKeyIdx];
+          const res = await verifyEmails(currentKey.token, [candidate]);
+
+          if (res.isExhausted) {
+            setApiKeys(prev =>
+              prev.map(k =>
+                k.token === currentKey.token ? { ...k, status: 'exhausted', creditsRemaining: 0 } : k
+              )
+            );
+            currentKeyIdx++;
+            continue;
+          }
+
+          if (res.isRateLimit) {
+            await new Promise(r => setTimeout(r, 1500));
+            retries++;
+            continue;
+          }
+
+          if (!res.success) {
+            lastErr = res.error;
+            retries++;
+            continue;
+          }
+
+          success = true;
+          tested.push(candidate);
+
+          if (res.isCatchAll) {
+            isCatchAll = true;
+            break;
+          }
+
+          if (res.validEmail) {
+            foundEmail = res.validEmail;
+            break; // STOP ON FIRST MATCH!
+          }
+
+          if (res.isUnknown) {
+            isUnknown = true;
+            break;
+          }
+        }
+
+        if (foundEmail || isCatchAll || isUnknown) {
+          break;
+        }
+      }
+
+      if (foundEmail) {
+        setResult({
+          status: 'found',
+          email: foundEmail,
+          permutationsTested: tested,
+        });
+      } else if (isCatchAll) {
+        setResult({
+          status: 'catch_all',
+          error: 'Mail server is Catch-All (accepts any email address, cannot determine specific mailbox).',
+          permutationsTested: tested,
+        });
+      } else if (isUnknown) {
+        setResult({
+          status: 'not_found',
+          error: 'Mailbox status unknown or accept-all.',
+          permutationsTested: tested,
+        });
+      } else {
+        setResult({
+          status: 'not_found',
+          error: lastErr,
+          permutationsTested: tested,
         });
       }
     } catch (err: any) {
@@ -129,7 +199,6 @@ export function SingleEmailFinder() {
       ln = parts.slice(1).join(' ');
     }
 
-    // Safe ID generation without Math.max call stack overflow
     const maxId = contacts.reduce((max, c) => (c.id > max ? c.id : max), 0);
     const nextId = maxId + 1;
 
@@ -142,6 +211,10 @@ export function SingleEmailFinder() {
       status:
         result.status === 'found'
           ? 'found'
+          : result.status === 'catch_all'
+          ? 'catch_all'
+          : result.status === 'no_mx'
+          ? 'skipped_no_mx'
           : result.status === 'not_found'
           ? 'not_found'
           : 'pending',
@@ -165,7 +238,7 @@ export function SingleEmailFinder() {
   };
 
   return (
-    <div className="bg-white rounded-lg border border-slate-200 p-5 shadow-sm max-w-3xl mx-auto">
+    <div className="bg-white rounded-lg border border-slate-200 p-5 shadow-xs max-w-3xl mx-auto">
       <div className="flex items-center justify-between mb-4 border-b border-slate-100 pb-3">
         <div>
           <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
@@ -173,7 +246,7 @@ export function SingleEmailFinder() {
             Single Email Finder & Verifier
           </h3>
           <p className="text-xs text-slate-500 mt-0.5">
-            Find or verify corporate email addresses using name-and-domain permutations
+            Sequential stop-on-match email finder with automatic catch-all detection
           </p>
         </div>
         {activeKey && (
@@ -242,12 +315,12 @@ export function SingleEmailFinder() {
           <button
             type="submit"
             disabled={isSearching}
-            className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-bold py-2.5 px-4 rounded transition-colors flex items-center justify-center gap-2"
+            className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-bold py-2.5 px-4 rounded transition-colors flex items-center justify-center gap-2 cursor-pointer"
           >
             {isSearching ? (
               <>
                 <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                <span>VERIFYING PERMUTATIONS...</span>
+                <span>VERIFYING SEQUENTIALLY...</span>
               </>
             ) : (
               <span>FIND & VERIFY EMAIL</span>
@@ -258,7 +331,7 @@ export function SingleEmailFinder() {
             type="button"
             onClick={handleAddToList}
             disabled={!firstName && !lastName && !emailInput}
-            className="bg-slate-100 hover:bg-slate-200 disabled:opacity-40 text-slate-700 text-xs font-semibold py-2.5 px-4 rounded transition-colors border border-slate-200"
+            className="bg-slate-100 hover:bg-slate-200 disabled:opacity-40 text-slate-700 text-xs font-semibold py-2.5 px-4 rounded transition-colors border border-slate-200 cursor-pointer"
           >
             + Add to Bulk Queue
           </button>
@@ -282,17 +355,40 @@ export function SingleEmailFinder() {
                 </div>
                 {result.permutationsTested && (
                   <div className="mt-1 text-[11px] text-emerald-700">
-                    Tested {result.permutationsTested.length} email pattern permutations
+                    Matched on call #{result.permutationsTested.length} (early stop saved{' '}
+                    {Math.max(0, 8 - result.permutationsTested.length)} calls)
                   </div>
                 )}
               </div>
               <button
                 type="button"
                 onClick={() => handleCopy(result.email!)}
-                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded transition-colors shadow-sm"
+                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded transition-colors shadow-xs cursor-pointer"
               >
                 {copied ? 'COPIED!' : 'COPY EMAIL'}
               </button>
+            </div>
+          )}
+
+          {result.status === 'catch_all' && (
+            <div className="p-4 bg-purple-50 border border-purple-200 rounded-lg text-xs text-purple-900">
+              <div className="font-bold flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-purple-500"></span>
+                <span>Catch-All Mail Server Detected</span>
+              </div>
+              <p className="mt-1 text-purple-700">
+                This domain accepts all incoming email addresses. Further permutations were stopped to save Apify credits.
+              </p>
+            </div>
+          )}
+
+          {result.status === 'no_mx' && (
+            <div className="p-4 bg-slate-100 border border-slate-200 rounded-lg text-xs text-slate-700">
+              <div className="font-bold flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-slate-400"></span>
+                <span>No MX Records Found</span>
+              </div>
+              <p className="mt-1 text-slate-500">{result.error}</p>
             </div>
           )}
 

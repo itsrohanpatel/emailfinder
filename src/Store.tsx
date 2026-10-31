@@ -7,11 +7,18 @@ import React, {
   useRef,
 } from 'react';
 import { Contact, ApiKey, Settings } from './types';
-import { generatePermutations } from './utils/permutation';
+import {
+  generatePermutations,
+  normalizeDomain,
+  detectPattern,
+  generateEmailByPattern,
+} from './utils/permutation';
 import { verifyEmails, getDefaultApiKey } from './utils/apify';
+import { checkDomainMx } from './utils/dns';
 
 const STORAGE_KEYS = 'veriflow_api_keys_v1';
 const STORAGE_SETTINGS = 'veriflow_settings_v1';
+const STORAGE_DOMAIN_PATTERNS = 'veriflow_domain_patterns_v1';
 
 interface AppState {
   contacts: Contact[];
@@ -20,6 +27,7 @@ interface AppState {
   isProcessing: boolean;
   isPaused: boolean;
   estimatedRemainingSec: number | null;
+  learnedDomainsCount: number;
 }
 
 interface AppContextType extends AppState {
@@ -31,6 +39,7 @@ interface AppContextType extends AppState {
   resumeProcessing: () => void;
   stopProcessing: () => void;
   clearContacts: () => void;
+  clearDomainCache: () => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -69,8 +78,10 @@ function loadInitialSettings(): Settings {
       if (parsed && typeof parsed.concurrency === 'number') {
         return {
           concurrency: Math.min(20, Math.max(1, parsed.concurrency)),
-          delayMs: Math.max(0, parsed.delayMs ?? 500),
+          delayMs: Math.max(0, parsed.delayMs ?? 300),
           reverifyAll: Boolean(parsed.reverifyAll),
+          enableDnsPreCheck: parsed.enableDnsPreCheck ?? true,
+          patternMode: parsed.patternMode || 'near_full',
         };
       }
     }
@@ -79,10 +90,27 @@ function loadInitialSettings(): Settings {
   }
 
   return {
-    concurrency: 4,
-    delayMs: 500,
+    concurrency: 10,
+    delayMs: 300,
     reverifyAll: false,
+    enableDnsPreCheck: true,
+    patternMode: 'near_full',
   };
+}
+
+function loadInitialDomainPatterns(): Map<string, string> {
+  try {
+    const raw = localStorage.getItem(STORAGE_DOMAIN_PATTERNS);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        return new Map(Object.entries(parsed));
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to load domain patterns from localStorage:', err);
+  }
+  return new Map<string, string>();
 }
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
@@ -96,11 +124,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // Synchronous atomic queue for concurrency
   const queueRef = useRef<number[]>([]);
-  // Run generation counter to discard zombie workers on stop/pause
   const runIdRef = useRef<number>(0);
   const keysRef = useRef<ApiKey[]>(apiKeys);
   const contactsMapRef = useRef<Map<number, Contact>>(new Map());
   const activeWorkersRef = useRef<number>(0);
+
+  // Domain pattern memory & cache
+  const domainPatternCache = useRef<Map<string, string>>(loadInitialDomainPatterns());
+  const [learnedDomainsCount, setLearnedDomainsCount] = useState<number>(
+    () => domainPatternCache.current.size
+  );
 
   // Sync keys ref & persistence
   useEffect(() => {
@@ -130,6 +163,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     contactsMapRef.current = map;
   }, [contacts]);
 
+  const saveDomainCache = useCallback(() => {
+    try {
+      const obj = Object.fromEntries(domainPatternCache.current);
+      localStorage.setItem(STORAGE_DOMAIN_PATTERNS, JSON.stringify(obj));
+      setLearnedDomainsCount(domainPatternCache.current.size);
+    } catch (e) {
+      console.warn('Domain cache save failed:', e);
+    }
+  }, []);
+
+  const clearDomainCache = useCallback(() => {
+    domainPatternCache.current.clear();
+    localStorage.removeItem(STORAGE_DOMAIN_PATTERNS);
+    setLearnedDomainsCount(0);
+  }, []);
+
   const updateContact = useCallback((id: number, updates: Partial<Contact>) => {
     setContacts(prev => prev.map(c => (c.id === id ? { ...c, ...updates } : c)));
     const existing = contactsMapRef.current.get(id);
@@ -151,8 +200,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const getNextActiveKey = useCallback((): ApiKey | null => {
     const currentList = keysRef.current;
-    const found = currentList.find(k => k.status === 'active' || k.status === 'unchecked');
-    return found || null;
+    return currentList.find(k => k.status === 'active' || k.status === 'unchecked') || null;
   }, []);
 
   const stopProcessing = useCallback(() => {
@@ -173,7 +221,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setIsProcessing(false);
     setEstimatedRemainingSec(null);
 
-    // Any in-flight row that was 'processing' will be put back to 'pending'
     setContacts(prev =>
       prev.map(c => (c.status === 'processing' ? { ...c, status: 'pending' } : c))
     );
@@ -182,7 +229,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const processQueue = useCallback(async () => {
     const currentRunId = ++runIdRef.current;
 
-    // Fill atomic queue with all pending contacts
     const pendingIds = contacts
       .filter(c => c.status === 'pending')
       .map(c => c.id);
@@ -216,14 +262,43 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
         updateContact(contactId, { status: 'processing' });
 
-        const permutations = generatePermutations(
+        const domain = normalizeDomain(contact.website || contact.email);
+
+        // 1. FREE DNS MX PRE-CHECK
+        if (settings.enableDnsPreCheck && domain && domain.includes('.')) {
+          const mxRes = await checkDomainMx(domain);
+          if (runIdRef.current !== currentRunId) return;
+
+          if (!mxRes.hasMx) {
+            updateContact(contactId, {
+              status: 'skipped_no_mx',
+              lastError: 'Domain has no active MX mail records (0 Apify cost)',
+            });
+            completedCount++;
+            continue;
+          }
+        }
+
+        // 2. CHECK IF DOMAIN WAS PREVIOUSLY DETECTED AS CATCH-ALL
+        if (domain && domainPatternCache.current.get(domain) === 'CATCH_ALL') {
+          updateContact(contactId, {
+            status: 'catch_all',
+            lastError: 'Domain mail server is catch-all (unverifiable permutations)',
+          });
+          completedCount++;
+          continue;
+        }
+
+        // 3. GENERATE CANDIDATE PERMUTATIONS IN ORDER
+        const standardCandidates = generatePermutations(
           contact.firstName,
           contact.lastName,
           contact.website,
-          contact.email
+          contact.email,
+          settings.patternMode
         );
 
-        if (permutations.length === 0) {
+        if (standardCandidates.length === 0) {
           updateContact(contactId, {
             status: 'skipped_missing_info',
             lastError: 'Missing name or valid domain',
@@ -232,91 +307,158 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           continue;
         }
 
-        let retries = 0;
-        let success = false;
+        // Check Domain Pattern Memory: Prioritize learned pattern at the front of the list
+        const cachedPattern = domain ? domainPatternCache.current.get(domain) : null;
+        let orderedCandidates = standardCandidates;
 
-        while (retries < 3 && !success && runIdRef.current === currentRunId) {
-          const activeKey = getNextActiveKey();
-          if (!activeKey) {
-            // Out of keys!
-            runIdRef.current++;
-            setIsPaused(true);
-            setIsProcessing(false);
-            updateContact(contactId, { status: 'pending' });
-            alert('All API keys are exhausted or invalid. Please add a valid Apify API key.');
-            return;
-          }
+        if (cachedPattern && cachedPattern !== 'CATCH_ALL') {
+          const cachedEmail = generateEmailByPattern(
+            contact.firstName,
+            contact.lastName,
+            domain,
+            cachedPattern
+          );
+          orderedCandidates = [
+            cachedEmail,
+            ...standardCandidates.filter(e => e.toLowerCase() !== cachedEmail.toLowerCase()),
+          ];
+        }
 
-          const res = await verifyEmails(activeKey.token, permutations);
+        // 4. SEQUENTIAL STOP-ON-MATCH VERIFICATION
+        let foundEmail: string | undefined;
+        let isCatchAll = false;
+        let isUnknown = false;
+        let lastErr: string | undefined;
+        const testedList: string[] = [];
 
-          if (runIdRef.current !== currentRunId) {
-            // Cancelled or stopped while awaiting API response
-            return;
-          }
+        for (const candidateEmail of orderedCandidates) {
+          if (runIdRef.current !== currentRunId) return;
 
-          if (res.isRateLimit) {
-            await new Promise(r => setTimeout(r, 2000 * Math.pow(2, retries)));
-            retries++;
-            continue;
-          }
+          let retries = 0;
+          let candidateDone = false;
 
-          if (res.isExhausted) {
-            // Mark exhausted synchronously to prevent infinite loop
-            markKeyExhausted(activeKey.token);
-            // Re-loop with the next active key immediately
-            continue;
-          }
-
-          if (!res.success) {
-            if (retries >= 2) {
-              updateContact(contactId, {
-                status: 'error',
-                lastError: res.error || 'Verification failed',
-                testedPermutations: permutations,
-              });
-            } else {
-              await new Promise(r => setTimeout(r, 1000));
+          while (retries < 3 && !candidateDone && runIdRef.current === currentRunId) {
+            const activeKey = getNextActiveKey();
+            if (!activeKey) {
+              runIdRef.current++;
+              setIsPaused(true);
+              setIsProcessing(false);
+              updateContact(contactId, { status: 'pending' });
+              alert('All API keys are exhausted or invalid. Please add a valid Apify API key.');
+              return;
             }
-            retries++;
-            continue;
+
+            // Verify 1 candidate email at a time
+            const res = await verifyEmails(activeKey.token, [candidateEmail]);
+            if (runIdRef.current !== currentRunId) return;
+
+            if (res.isRateLimit) {
+              await new Promise(r => setTimeout(r, 2000 * Math.pow(2, retries)));
+              retries++;
+              continue;
+            }
+
+            if (res.isExhausted) {
+              markKeyExhausted(activeKey.token);
+              continue;
+            }
+
+            if (!res.success) {
+              lastErr = res.error;
+              if (retries >= 2) {
+                candidateDone = true;
+              } else {
+                await new Promise(r => setTimeout(r, 800));
+              }
+              retries++;
+              continue;
+            }
+
+            // Success response for this candidate
+            candidateDone = true;
+            testedList.push(candidateEmail);
+
+            // A: Catch-All Bail-Out
+            if (res.isCatchAll) {
+              isCatchAll = true;
+              if (domain) {
+                domainPatternCache.current.set(domain, 'CATCH_ALL');
+                saveDomainCache();
+              }
+              break; // Stop testing further candidates!
+            }
+
+            // B: Match Found! Stop immediately!
+            if (res.validEmail) {
+              foundEmail = res.validEmail;
+
+              // Learn the company pattern for subsequent contacts
+              if (domain && contact.firstName) {
+                const emailUser = res.validEmail.split('@')[0];
+                const detectedPat = detectPattern(emailUser, contact.firstName, contact.lastName);
+                if (detectedPat) {
+                  domainPatternCache.current.set(domain, detectedPat);
+                  saveDomainCache();
+                }
+              }
+              break; // STOP ON FIRST MATCH!
+            }
+
+            // C: Status Unknown / Accept-All Bail-Out
+            if (res.isUnknown) {
+              isUnknown = true;
+              break;
+            }
+
+            // D: Status Invalid -> Loop advances to next candidate permutation
           }
 
-          // Successful verification result
-          success = true;
-          if (res.validEmail) {
+          if (foundEmail || isCatchAll || isUnknown) {
+            break;
+          }
+
+          // Optional worker delay between sequential candidate checks
+          if (settings.delayMs > 0 && runIdRef.current === currentRunId) {
+            await new Promise(r => setTimeout(r, settings.delayMs));
+          }
+        }
+
+        // Record contact result
+        if (runIdRef.current === currentRunId) {
+          if (foundEmail) {
             updateContact(contactId, {
               status: 'found',
-              email: res.validEmail,
-              testedPermutations: permutations,
+              email: foundEmail,
+              testedPermutations: testedList,
+            });
+          } else if (isCatchAll) {
+            updateContact(contactId, {
+              status: 'catch_all',
+              lastError: 'Domain is catch-all (mailbox verified as accept-all)',
+              testedPermutations: testedList,
+            });
+          } else if (isUnknown) {
+            updateContact(contactId, {
+              status: 'not_found',
+              lastError: 'Mailbox status unknown or accept-all',
+              testedPermutations: testedList,
             });
           } else {
             updateContact(contactId, {
               status: 'not_found',
-              testedPermutations: permutations,
+              lastError: lastErr,
+              testedPermutations: testedList,
             });
           }
-        }
 
-        if (!success && runIdRef.current === currentRunId) {
-          const currentStatus = contactsMapRef.current.get(contactId)?.status;
-          if (currentStatus === 'processing') {
-            updateContact(contactId, { status: 'pending' });
+          completedCount++;
+
+          const elapsedSec = (Date.now() - startTime) / 1000;
+          if (completedCount > 0 && elapsedSec > 2) {
+            const ratePerSec = completedCount / elapsedSec;
+            const remaining = Math.max(0, initialTotal - completedCount);
+            setEstimatedRemainingSec(Math.round(remaining / ratePerSec));
           }
-        }
-
-        completedCount++;
-
-        // Calculate estimated remaining seconds
-        const elapsedSec = (Date.now() - startTime) / 1000;
-        if (completedCount > 0 && elapsedSec > 2) {
-          const ratePerSec = completedCount / elapsedSec;
-          const remaining = Math.max(0, initialTotal - completedCount);
-          setEstimatedRemainingSec(Math.round(remaining / ratePerSec));
-        }
-
-        // Delay between batch tasks
-        if (settings.delayMs > 0 && runIdRef.current === currentRunId) {
-          await new Promise(r => setTimeout(r, settings.delayMs));
         }
       }
 
@@ -331,7 +473,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     for (let i = 0; i < workerCount; i++) {
       worker();
     }
-  }, [contacts, getNextActiveKey, markKeyExhausted, settings, updateContact]);
+  }, [
+    contacts,
+    getNextActiveKey,
+    markKeyExhausted,
+    saveDomainCache,
+    settings,
+    updateContact,
+  ]);
 
   const startProcessing = useCallback(() => {
     processQueue();
@@ -358,11 +507,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         isProcessing,
         isPaused,
         estimatedRemainingSec,
+        learnedDomainsCount,
         startProcessing,
         pauseProcessing,
         resumeProcessing,
         stopProcessing,
         clearContacts,
+        clearDomainCache,
       }}
     >
       {children}

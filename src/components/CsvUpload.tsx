@@ -3,11 +3,13 @@ import Papa from 'papaparse';
 import { useAppStore } from '../Store';
 import { Contact } from '../types';
 import { Upload } from 'lucide-react';
+import { normalizeDomain } from '../utils/permutation';
 
 export function CsvUpload() {
   const { setContacts, settings } = useAppStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
+  const [dupCount, setDupCount] = useState<number | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 
   const processData = (data: any[]) => {
@@ -27,14 +29,12 @@ export function CsvUpload() {
 
     // 1. Detect First Name / Full Name
     const findFirstNameHeader = (): string | null => {
-      // Step A: Exact matches
       const exactList = ['first name', 'firstname', 'first', 'full name', 'fullname', 'contact name', 'name'];
       for (const target of exactList) {
         const idx = lowerHeaders.indexOf(target);
         if (idx !== -1) return cleanHeaders[idx];
       }
 
-      // Step B: Partial matches excluding companies/accounts
       for (let i = 0; i < lowerHeaders.length; i++) {
         const h = lowerHeaders[i];
         if (
@@ -73,7 +73,6 @@ export function CsvUpload() {
       }
       for (let i = 0; i < lowerHeaders.length; i++) {
         const h = lowerHeaders[i];
-        // Exclude social links that aren't the primary company domain
         if (
           (h.includes('website') || h.includes('domain') || h.includes('url')) &&
           !h.includes('linkedin') &&
@@ -119,34 +118,50 @@ export function CsvUpload() {
       return;
     }
 
+    const seenKeys = new Set<string>();
+    let duplicates = 0;
     let nextId = 1;
-    const newContacts: Contact[] = data.map(row => {
+
+    const newContacts: Contact[] = [];
+
+    for (const row of data) {
       const existingEmail = emailHeader ? String(row[emailHeader] || '').trim() : '';
       const hasExistingEmail = existingEmail !== '' && existingEmail.includes('@');
       const skipEmail = hasExistingEmail && !settings.reverifyAll;
 
       let rawFn = fnHeader ? String(row[fnHeader] || '').trim() : '';
       let rawLn = lnHeader ? String(row[lnHeader] || '').trim() : '';
+      const rawDomain = urlHeader ? String(row[urlHeader] || '').trim() : '';
 
-      // If full name in first name and last name empty
       if (rawFn && !rawLn && rawFn.includes(' ')) {
         const parts = rawFn.split(/\s+/);
         rawFn = parts[0];
         rawLn = parts.slice(1).join(' ');
       }
 
-      return {
+      // Deduplication key
+      const normDomain = normalizeDomain(rawDomain || existingEmail);
+      const dedupKey = `${rawFn.toLowerCase()}|${rawLn.toLowerCase()}|${normDomain}|${existingEmail.toLowerCase()}`;
+
+      if (seenKeys.has(dedupKey)) {
+        duplicates++;
+        continue;
+      }
+      seenKeys.add(dedupKey);
+
+      newContacts.push({
         id: nextId++,
         firstName: rawFn,
         lastName: rawLn,
-        website: urlHeader ? String(row[urlHeader] || '').trim() : '',
+        website: rawDomain,
         email: existingEmail,
         status: skipEmail ? 'found' : 'pending',
         originalData: row,
-      };
-    });
+      });
+    }
 
     setContacts(newContacts);
+    setDupCount(duplicates);
     setError(null);
   };
 
@@ -219,6 +234,14 @@ export function CsvUpload() {
           className="hidden"
         />
       </div>
+
+      {dupCount !== null && dupCount > 0 && (
+        <div className="mt-3 w-full max-w-xl text-xs font-mono text-emerald-800 bg-emerald-50 border border-emerald-200 p-2.5 rounded flex items-center justify-between">
+          <span>✓ Auto-deduplicated: <b>{dupCount}</b> duplicate rows removed on import</span>
+          <button onClick={() => setDupCount(null)} className="text-emerald-600 hover:text-emerald-900 font-bold ml-2">×</button>
+        </div>
+      )}
+
       {error && (
         <div className="mt-4 w-full max-w-xl text-xs font-mono text-red-600 bg-red-50 border border-red-200 p-3 rounded">
           [ERROR] {error}

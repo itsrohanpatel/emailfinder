@@ -1,10 +1,20 @@
+import { PermutationMode } from './utils/permutation';
+
 export interface Contact {
   id: number;
   firstName: string;
   lastName: string;
   website: string;
   email: string;
-  status: 'pending' | 'processing' | 'found' | 'not_found' | 'error' | 'skipped_missing_info';
+  status:
+    | 'pending'
+    | 'processing'
+    | 'found'
+    | 'not_found'
+    | 'error'
+    | 'skipped_missing_info'
+    | 'skipped_no_mx'
+    | 'catch_all';
   lastError?: string;
   testedPermutations?: string[];
   originalData: Record<string, any>;
@@ -22,4 +32,6 @@ export interface Settings {
   concurrency: number;
   delayMs: number;
   reverifyAll: boolean;
+  enableDnsPreCheck: boolean;
+  patternMode: PermutationMode;
 }

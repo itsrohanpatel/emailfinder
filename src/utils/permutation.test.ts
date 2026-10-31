@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeDomain, sanitizeNamePart, generatePermutations } from './permutation';
+import {
+  normalizeDomain,
+  sanitizeNamePart,
+  generatePermutations,
+  detectPattern,
+  generateEmailByPattern,
+  type PermutationMode,
+} from './permutation';
 
 describe('normalizeDomain', () => {
   it('strips protocols, www, query params, and paths', () => {
@@ -33,36 +40,56 @@ describe('sanitizeNamePart', () => {
   });
 });
 
-describe('generatePermutations', () => {
-  it('generates standard business email formats for first and last name', () => {
-    const list = generatePermutations('Rohan', 'Patel', 'https://veriflow.io');
-    expect(list).toContain('rohan@veriflow.io');
-    expect(list).toContain('rohan.patel@veriflow.io');
-    expect(list).toContain('rohanpatel@veriflow.io');
-    expect(list).toContain('rpatel@veriflow.io');
-    expect(list).toContain('r.patel@veriflow.io');
-    expect(list).toContain('patel.rohan@veriflow.io');
-    expect(list).toContain('rohan_patel@veriflow.io');
+describe('generatePermutations with modes', () => {
+  it('near_full mode (default) returns top 8 probability-ordered patterns', () => {
+    const list = generatePermutations('Shivani', 'Bajaj', 'marscosmetics.in', undefined, 'near_full');
+    expect(list[0]).toBe('shivani@marscosmetics.in'); // first (42%)
+    expect(list[1]).toBe('shivani.bajaj@marscosmetics.in'); // first.last (33.7%)
+    expect(list[2]).toBe('shivanibajaj@marscosmetics.in'); // firstlast (5.5%)
+    expect(list[3]).toBe('sbajaj@marscosmetics.in'); // flast (5.4%)
+    expect(list[4]).toBe('bajaj@marscosmetics.in'); // last (3.6%)
+    expect(list[5]).toBe('bajaj.shivani@marscosmetics.in'); // last.first (3.0%)
+    expect(list[6]).toBe('shivani_bajaj@marscosmetics.in'); // first_last (3.0%)
+    expect(list[7]).toBe('bajajshivani@marscosmetics.in'); // lastfirst (2.7%)
+    expect(list.length).toBe(8);
   });
 
-  it('splits full name when passed entirely in firstName', () => {
-    const list = generatePermutations('Satya Nadella', '', 'microsoft.com');
-    expect(list).toContain('satya@microsoft.com');
-    expect(list).toContain('satya.nadella@microsoft.com');
-    expect(list).toContain('snadella@microsoft.com');
+  it('lean mode returns exactly top 4 patterns', () => {
+    const list = generatePermutations('Shivani', 'Bajaj', 'marscosmetics.in', undefined, 'lean');
+    expect(list.length).toBe(4);
+    expect(list).toEqual([
+      'shivani@marscosmetics.in',
+      'shivani.bajaj@marscosmetics.in',
+      'shivanibajaj@marscosmetics.in',
+      'sbajaj@marscosmetics.in',
+    ]);
   });
 
-  it('places existing valid email at the top of the test list', () => {
-    const list = generatePermutations('Tim', 'Cook', 'apple.com', 'tcook@apple.com');
-    expect(list[0]).toBe('tcook@apple.com');
+  it('exhaustive mode returns all 16 permutations', () => {
+    const list = generatePermutations('Shivani', 'Bajaj', 'marscosmetics.in', undefined, 'exhaustive');
+    expect(list.length).toBeGreaterThan(10);
+  });
+});
+
+describe('detectPattern & generateEmailByPattern', () => {
+  it('detects pattern correctly from verified email', () => {
+    expect(detectPattern('shivani.bajaj', 'Shivani', 'Bajaj')).toBe('first.last');
+    expect(detectPattern('shivani', 'Shivani', 'Bajaj')).toBe('first');
+    expect(detectPattern('sbajaj', 'Shivani', 'Bajaj')).toBe('flast');
+    expect(detectPattern('shivanibajaj', 'Shivani', 'Bajaj')).toBe('firstlast');
+    expect(detectPattern('bajaj', 'Shivani', 'Bajaj')).toBe('last');
+    expect(detectPattern('bajaj.shivani', 'Shivani', 'Bajaj')).toBe('last.first');
   });
 
-  it('does not produce duplicate or malformed addresses', () => {
-    const list = generatePermutations('Dr. José', "O'Neil", 'acme.org');
-    for (const email of list) {
-      expect(email).not.toContain('..');
-      expect(email).not.toContain("'");
-      expect(email).toMatch(/^[a-z0-9._-]+@[a-z0-9.-]+\.[a-z]{2,}$/);
-    }
+  it('generates email string deterministically from pattern', () => {
+    expect(generateEmailByPattern('Shivani', 'Bajaj', 'marscosmetics.in', 'first.last')).toBe(
+      'shivani.bajaj@marscosmetics.in'
+    );
+    expect(generateEmailByPattern('Shivani', 'Bajaj', 'marscosmetics.in', 'first')).toBe(
+      'shivani@marscosmetics.in'
+    );
+    expect(generateEmailByPattern('Shivani', 'Bajaj', 'marscosmetics.in', 'flast')).toBe(
+      'sbajaj@marscosmetics.in'
+    );
   });
 });

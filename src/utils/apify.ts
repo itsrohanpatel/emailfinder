@@ -47,16 +47,21 @@ export async function checkApiKey(token: string): Promise<{
   }
 }
 
-export async function verifyEmails(
-  token: string,
-  emails: string[]
-): Promise<{
+export interface VerifyEmailsResponse {
   success: boolean;
   validEmail?: string;
+  isCatchAll?: boolean;
+  isUnknown?: boolean;
+  status?: string;
   error?: string;
   isRateLimit?: boolean;
   isExhausted?: boolean;
-}> {
+}
+
+export async function verifyEmails(
+  token: string,
+  emails: string[]
+): Promise<VerifyEmailsResponse> {
   if (!token || !token.trim()) {
     return { success: false, error: 'No API key provided', isExhausted: true };
   }
@@ -111,27 +116,47 @@ export async function verifyEmails(
       return { success: false, error: errorMsg, isExhausted };
     }
 
+    // BounceVerify returns an array of evaluated item records
     if (Array.isArray(data)) {
+      // Check for catch-all status on the first returned record
+      const firstItem = data[0];
+      const isCatchAll = Boolean(firstItem?.is_catch_all);
+      const isUnknown = firstItem?.status === 'unknown';
+
+      // Look for a verified valid / deliverable email
       const validItem = data.find(
         (item: any) =>
           item.status === 'valid' ||
           item.status === 'deliverable' ||
           item.deliverable === true ||
-          item.is_valid === true
+          item.smtp_valid === true
       );
 
       if (validItem) {
-        return { success: true, validEmail: validItem.email };
+        return {
+          success: true,
+          validEmail: validItem.email,
+          isCatchAll,
+          isUnknown,
+          status: validItem.status,
+        };
       }
-      return { success: true }; // Permutations tested, none were valid
+
+      return {
+        success: true,
+        isCatchAll,
+        isUnknown,
+        status: firstItem?.status || 'invalid',
+      };
     }
 
-    // In case of single object response
     if (data && typeof data === 'object') {
-      if (data.status === 'valid' && data.email) {
-        return { success: true, validEmail: data.email };
+      const isCatchAll = Boolean(data.is_catch_all);
+      const isUnknown = data.status === 'unknown';
+      if ((data.status === 'valid' || data.smtp_valid === true) && data.email) {
+        return { success: true, validEmail: data.email, isCatchAll, isUnknown, status: data.status };
       }
-      return { success: true };
+      return { success: true, isCatchAll, isUnknown, status: data.status || 'invalid' };
     }
 
     return { success: false, error: 'Unexpected API response structure' };
