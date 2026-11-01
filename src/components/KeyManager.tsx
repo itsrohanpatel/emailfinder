@@ -77,6 +77,17 @@ export function KeyManager() {
       return;
     }
 
+    // Detect if user pasted a GitHub Personal Access Token by mistake
+    const githubTokens = uniqueTokens.filter(t => t.startsWith('github_pat_') || t.startsWith('ghp_'));
+    if (githubTokens.length > 0) {
+      showToast({
+        type: 'error',
+        title: 'GitHub Token Detected',
+        description: 'You entered a GitHub Personal Access Token. This sidebar is for Apify API Keys (starts with apify_api_...). To configure your GitHub Cloud Runner, open Settings (gear icon in top right).',
+      });
+      return;
+    }
+
     const newEntries: ApiKey[] = uniqueTokens.map(token => ({
       token,
       label: 'Apify Key',

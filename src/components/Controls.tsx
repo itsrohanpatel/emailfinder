@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import Papa from 'papaparse';
 import { useAppStore } from '../Store';
 import {
@@ -38,8 +38,13 @@ export function Controls() {
 
   const [showPreFlight, setShowPreFlight] = useState(false);
   const [isDispatchingCloud, setIsDispatchingCloud] = useState(false);
-  const [githubRepoInput, setGithubRepoInput] = useState(settings.githubRepo || '');
+  const [githubRepoInput, setGithubRepoInput] = useState(settings.githubRepo || 'itsrohanpatel/emailfinder');
   const [githubTokenInput, setGithubTokenInput] = useState(settings.githubToken || '');
+
+  useEffect(() => {
+    if (settings.githubRepo) setGithubRepoInput(settings.githubRepo);
+    if (settings.githubToken) setGithubTokenInput(settings.githubToken);
+  }, [settings.githubRepo, settings.githubToken]);
 
   const total = contacts.length;
   if (total === 0) return null;
@@ -71,7 +76,14 @@ export function Controls() {
   };
 
   const handleConfirmCloudLaunch = async () => {
-    if (!githubTokenInput.trim() || !githubRepoInput.trim()) {
+    const cleanRepo = githubRepoInput
+      .trim()
+      .replace(/^https?:\/\/github\.com\//i, '')
+      .replace(/^git@github\.com:/i, '')
+      .replace(/\.git$/i, '')
+      .replace(/^\/+|\/+$/g, '');
+
+    if (!githubTokenInput.trim() || !cleanRepo) {
       showToast({
         type: 'error',
         title: 'Missing GitHub Configuration',
@@ -83,7 +95,7 @@ export function Controls() {
     // Save tokens in settings
     setSettings(s => ({
       ...s,
-      githubRepo: githubRepoInput.trim(),
+      githubRepo: cleanRepo,
       githubToken: githubTokenInput.trim(),
       executionTarget: 'github_cloud',
     }));
@@ -96,7 +108,7 @@ export function Controls() {
         .map(k => k.token);
 
       const res = await fetch(
-        `https://api.github.com/repos/${githubRepoInput.trim()}/actions/workflows/verify.yml/dispatches`,
+        `https://api.github.com/repos/${cleanRepo}/actions/workflows/verify.yml/dispatches`,
         {
           method: 'POST',
           headers: {

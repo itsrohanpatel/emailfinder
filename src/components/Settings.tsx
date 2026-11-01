@@ -225,10 +225,17 @@ export function SettingsPanel() {
               <label className="block text-[10px] font-mono text-slate-500 mb-1">GitHub Repo (owner/repo)</label>
               <input
                 type="text"
-                placeholder="e.g. yourname/email-finder-github"
+                placeholder="itsrohanpatel/emailfinder"
                 value={settings.githubRepo || ''}
                 disabled={isProcessing}
-                onChange={e => setSettings(s => ({ ...s, githubRepo: e.target.value.trim() }))}
+                onChange={e => {
+                  const cleaned = e.target.value.trim()
+                    .replace(/^https?:\/\/github\.com\//i, '')
+                    .replace(/^git@github\.com:/i, '')
+                    .replace(/\.git$/i, '')
+                    .replace(/^\/+|\/+$/g, '');
+                  setSettings(s => ({ ...s, githubRepo: cleaned }));
+                }}
                 className="w-full text-xs font-mono bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:bg-white focus:outline-none focus:border-blue-500"
               />
             </div>
