@@ -126,6 +126,48 @@ export function Controls() {
     setIsDispatchingCloud(true);
 
     try {
+      let datasetId = '';
+      const primaryKey = activeTokens[0];
+
+      // Always stage contacts via Apify Dataset to completely bypass GitHub Actions 64KB input limit
+      showToast({
+        type: 'info',
+        title: 'Staging Cloud Job',
+        description: `Uploading ${pendingContacts.length} contacts to high-speed Apify cloud runner...`,
+      });
+
+      try {
+        const dsRes = await fetch(`https://api.apify.com/v2/datasets?token=${primaryKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: `veriflow-job-${Date.now()}` }),
+        });
+        const dsData = await dsRes.json();
+        datasetId = dsData?.data?.id || '';
+
+        if (datasetId) {
+          // Upload in chunks of 500 contacts
+          const CHUNK_SIZE = 500;
+          for (let i = 0; i < pendingContacts.length; i += CHUNK_SIZE) {
+            const chunk = pendingContacts.slice(i, i + CHUNK_SIZE);
+            await fetch(`https://api.apify.com/v2/datasets/${datasetId}/items?token=${primaryKey}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(chunk),
+            });
+          }
+        }
+      } catch (dsErr) {
+        console.warn('Dataset staging error:', dsErr);
+      }
+
+      const rawJson = JSON.stringify(pendingContacts);
+      const safeContactsJson = datasetId ? '[]' : (rawJson.length < 50000 ? rawJson : '[]');
+
+      if (!datasetId && rawJson.length >= 50000) {
+        throw new Error('Contacts list exceeds GitHub Actions input size limit (64KB) and dataset creation failed.');
+      }
+
       const res = await fetch(
         `https://api.github.com/repos/${cleanRepo}/actions/workflows/verify.yml/dispatches`,
         {
@@ -138,7 +180,8 @@ export function Controls() {
           body: JSON.stringify({
             ref: 'main',
             inputs: {
-              contacts_json: JSON.stringify(pendingContacts),
+              contacts_json: safeContactsJson,
+              dataset_id: datasetId,
               apify_keys: activeTokens.join(';'),
               pattern_mode: settings.patternMode,
               key_strategy: settings.keyStrategy,

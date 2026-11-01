@@ -13,14 +13,6 @@ const patternMode = process.env.INPUT_PATTERN_MODE || 'near_full';
 const keyStrategy = process.env.INPUT_KEY_STRATEGY || 'round_robin';
 const datasetId = process.env.INPUT_DATASET_ID || '';
 
-let contacts = [];
-try {
-  contacts = JSON.parse(rawContacts);
-} catch (e) {
-  console.error('Failed to parse INPUT_CONTACTS JSON:', e.message);
-  process.exit(1);
-}
-
 const keys = rawKeys
   .split(';')
   .map(k => k.trim())
@@ -30,9 +22,6 @@ if (keys.length === 0) {
   console.error('Error: No Apify API keys provided.');
   process.exit(1);
 }
-
-console.log(`[Cloud Runner] Loaded ${contacts.length} contacts.`);
-console.log(`[Cloud Runner] Loaded ${keys.length} API keys (Strategy: ${keyStrategy}).`);
 
 // Utilities for Permutation & DNS
 function normalizeDomain(url) {
@@ -160,6 +149,40 @@ async function verifySingle(token, email) {
 
 // Main Execution Pool
 async function run() {
+  let contacts = [];
+
+  if (datasetId && keys.length > 0) {
+    console.log(`[Cloud Runner] Loading contacts from Apify Dataset: ${datasetId}...`);
+    try {
+      const res = await fetch(`https://api.apify.com/v2/datasets/${datasetId}/items?token=${keys[0]}&limit=50000`);
+      if (res.ok) {
+        contacts = await res.json();
+        console.log(`[Cloud Runner] Successfully loaded ${contacts.length} contacts from Apify Dataset.`);
+      } else {
+        console.warn(`[Cloud Runner] Apify Dataset fetch HTTP ${res.status}. Falling back to INPUT_CONTACTS.`);
+      }
+    } catch (err) {
+      console.warn(`[Cloud Runner] Error loading dataset: ${err.message}. Falling back.`);
+    }
+  }
+
+  if (contacts.length === 0) {
+    try {
+      contacts = JSON.parse(rawContacts || '[]');
+    } catch (e) {
+      console.error('Failed to parse INPUT_CONTACTS JSON:', e.message);
+      process.exit(1);
+    }
+  }
+
+  if (contacts.length === 0) {
+    console.error('Error: No contacts found to verify.');
+    process.exit(1);
+  }
+
+  console.log(`[Cloud Runner] Loaded ${contacts.length} contacts.`);
+  console.log(`[Cloud Runner] Loaded ${keys.length} API keys (Strategy: ${keyStrategy}).`);
+
   const results = [];
   const total = contacts.length;
   let completed = 0;
@@ -175,7 +198,7 @@ async function run() {
       const contact = queue.shift();
       if (!contact) break;
 
-      const domain = normalizeDomain(contact.website || contact.domain || contact.Website || contact.Domain || '');
+      const domain = normalizeDomain(contact.website || contact.domain || contact.company_domain || contact.Website || contact.Domain || '');
 
       // 1. DNS Pre-Check
       if (domain && domain.includes('.')) {
@@ -201,8 +224,8 @@ async function run() {
       }
 
       // 3. Permutations
-      const fn = contact.firstName || contact['First Name'] || '';
-      const ln = contact.lastName || contact['Last Name'] || '';
+      const fn = contact.firstName || contact.first_name || contact['First Name'] || '';
+      const ln = contact.lastName || contact.last_name || contact['Last Name'] || '';
       const perms = generatePermutations(fn, ln, domain, patternMode);
 
       let foundEmail = '';

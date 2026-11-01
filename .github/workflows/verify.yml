@@ -4,8 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       contacts_json:
-        description: 'JSON array of contacts to verify'
-        required: true
+        description: 'JSON array of contacts to verify (or supply dataset_id)'
+        required: false
+        default: '[]'
         type: string
       apify_keys:
         description: 'Semicolon-separated Apify API tokens (or set APIFY_API_KEY secret)'
