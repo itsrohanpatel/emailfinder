@@ -33,6 +33,11 @@ on:
         required: false
         default: ''
         type: string
+      enable_role_fallback:
+        description: 'Whether to test hr@ and careers@ if personal email not found'
+        required: false
+        default: 'true'
+        type: string
 
 jobs:
   verify:
@@ -61,6 +66,7 @@ jobs:
           INPUT_KEY_STRATEGY: ${{ inputs.key_strategy }}
           INPUT_DATASET_ID: ${{ inputs.dataset_id }}
           INPUT_RESULTS_DATASET_ID: ${{ inputs.results_dataset_id }}
+          INPUT_ENABLE_ROLE_FALLBACK: ${{ inputs.enable_role_fallback }}
         run: node scripts/cloud_verify.cjs
 
       - name: Upload Verified Results Artifact

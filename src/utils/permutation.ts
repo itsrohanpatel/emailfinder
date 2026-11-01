@@ -221,40 +221,50 @@ export function generatePermutations(
       const f1 = f.charAt(0);
       const l1 = l.charAt(0);
 
-      // Top 4 patterns (Lean) -> 86.7% coverage
-      const top4 = [
-        `${f}@${domain}`,
-        `${f}.${l}@${domain}`,
-        `${f}${l}@${domain}`,
-        `${f1}${l}@${domain}`,
-      ];
-
-      // Next 4 patterns -> brings coverage to 98.9% (Near-Full)
-      const next4 = [
-        `${l}@${domain}`,
-        `${l}.${f}@${domain}`,
-        `${f}_${l}@${domain}`,
-        `${l}${f}@${domain}`,
-      ];
-
-      // Extended remaining patterns (Exhaustive)
-      const extended = [
-        `${f1}.${l}@${domain}`,
-        `${f}${l1}@${domain}`,
-        `${f}.${l1}@${domain}`,
-        `${l1}${f}@${domain}`,
-        `${l1}.${f}@${domain}`,
-        `${l}${f1}@${domain}`,
-        `${l}.${f1}@${domain}`,
-        `${f}-${l}@${domain}`,
-      ];
-
-      if (mode === 'lean') {
-        permutations.push(...top4);
-      } else if (mode === 'near_full') {
-        permutations.push(...top4, ...next4);
+      // Single-Initial Smart Mode (e.g. Maggie W):
+      // Restrict to the 3 realistic patterns to prevent redundant permutation waste
+      if (l.length === 1) {
+        permutations.push(
+          `${f}.${l}@${domain}`,
+          `${f}${l}@${domain}`,
+          `${f}@${domain}`
+        );
       } else {
-        permutations.push(...top4, ...next4, ...extended);
+        // Top 4 patterns (Lean) -> 86.7% coverage
+        const top4 = [
+          `${f}@${domain}`,
+          `${f}.${l}@${domain}`,
+          `${f}${l}@${domain}`,
+          `${f1}${l}@${domain}`,
+        ];
+
+        // Next 4 patterns -> brings coverage to 98.9% (Near-Full)
+        const next4 = [
+          `${l}@${domain}`,
+          `${l}.${f}@${domain}`,
+          `${f}_${l}@${domain}`,
+          `${l}${f}@${domain}`,
+        ];
+
+        // Extended remaining patterns (Exhaustive)
+        const extended = [
+          `${f1}.${l}@${domain}`,
+          `${f}${l1}@${domain}`,
+          `${f}.${l1}@${domain}`,
+          `${l1}${f}@${domain}`,
+          `${l1}.${f}@${domain}`,
+          `${l}${f1}@${domain}`,
+          `${l}.${f1}@${domain}`,
+          `${f}-${l}@${domain}`,
+        ];
+
+        if (mode === 'lean') {
+          permutations.push(...top4);
+        } else if (mode === 'near_full') {
+          permutations.push(...top4, ...next4);
+        } else {
+          permutations.push(...top4, ...next4, ...extended);
+        }
       }
     } else if (f) {
       permutations.push(`${f}@${domain}`);
@@ -277,4 +287,13 @@ export function generatePermutations(
   }
 
   return result;
+}
+
+/**
+ * Generates departmental / company fallback email candidates (hr@ and careers@)
+ */
+export function generateRolePermutations(website: string): string[] {
+  const domain = normalizeDomain(website);
+  if (!domain || !domain.includes('.')) return [];
+  return [`hr@${domain}`, `careers@${domain}`];
 }

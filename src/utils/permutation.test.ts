@@ -3,6 +3,7 @@ import {
   normalizeDomain,
   sanitizeNamePart,
   generatePermutations,
+  generateRolePermutations,
   detectPattern,
   generateEmailByPattern,
   type PermutationMode,
@@ -72,6 +73,21 @@ describe('generatePermutations with modes', () => {
 });
 
 describe('detectPattern & generateEmailByPattern', () => {
+  it('handles single-letter last initial with exactly 3 unique patterns and zero duplicates', () => {
+    const list = generatePermutations('Maggie', 'W', 'advocatehealth.org', undefined, 'near_full');
+    expect(list).toHaveLength(3);
+    expect(list).toEqual([
+      'maggie.w@advocatehealth.org',
+      'maggiew@advocatehealth.org',
+      'maggie@advocatehealth.org',
+    ]);
+  });
+
+  it('generates role permutations hr@ and careers@', () => {
+    const roles = generateRolePermutations('advocatehealth.org');
+    expect(roles).toEqual(['hr@advocatehealth.org', 'careers@advocatehealth.org']);
+  });
+
   it('detects pattern correctly from verified email', () => {
     expect(detectPattern('shivani.bajaj', 'Shivani', 'Bajaj')).toBe('first.last');
     expect(detectPattern('shivani', 'Shivani', 'Bajaj')).toBe('first');

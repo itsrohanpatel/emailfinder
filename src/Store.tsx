@@ -173,6 +173,7 @@ function loadInitialSettings(): Settings {
     delayMs: 300,
     reverifyAll: false,
     enableDnsPreCheck: true,
+    enableRoleFallback: true,
     patternMode: 'near_full',
     keyStrategy: 'round_robin',
     executionTarget: 'local',
@@ -681,12 +682,74 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               }
             }
 
+            let isRoleFallback = false;
+
+            // Independent HR & Careers Fallback:
+            // If personal permutations yield no match, verify hr@ then careers@ for this contact
+            if (
+              !foundEmail &&
+              !isCatchAll &&
+              !isUnknown &&
+              domain &&
+              settings.enableRoleFallback !== false
+            ) {
+              const roleCandidates = [`hr@${domain}`, `careers@${domain}`];
+              for (const roleEmail of roleCandidates) {
+                if (runIdRef.current !== currentRunId) return;
+
+                let roleRetries = 0;
+                let roleDone = false;
+
+                while (roleRetries < 5 && !roleDone && runIdRef.current === currentRunId) {
+                  const activeKey = getNextActiveKey();
+                  if (!activeKey) break;
+
+                  const res = await verifyEmails(activeKey.token, [roleEmail]);
+                  if (res.isRateLimit) {
+                    await new Promise(r => setTimeout(r, 2000 + Math.random() * 1000));
+                    roleRetries++;
+                    continue;
+                  }
+                  if (res.isExhausted) {
+                    markKeyExhausted(activeKey.token);
+                    continue;
+                  }
+                  if (!res.success) {
+                    await new Promise(r => setTimeout(r, 1000));
+                    roleRetries++;
+                    continue;
+                  }
+
+                  roleDone = true;
+                  testedList.push(roleEmail);
+
+                  if (res.isCatchAll) {
+                    isCatchAll = true;
+                    if (domain) {
+                      domainPatternCache.current.set(domain, 'CATCH_ALL');
+                      saveDomainCache();
+                    }
+                    break;
+                  }
+
+                  if (res.validEmail) {
+                    foundEmail = res.validEmail;
+                    isRoleFallback = true;
+                    break;
+                  }
+                }
+
+                if (foundEmail || isCatchAll) break;
+              }
+            }
+
             // Record contact result
             if (runIdRef.current === currentRunId) {
               if (foundEmail) {
                 updateContact(contactId, {
-                  status: 'found',
+                  status: isRoleFallback ? 'found_role_fallback' : 'found',
                   email: foundEmail,
+                  lastError: isRoleFallback ? 'Company HR/Careers Fallback' : undefined,
                   testedPermutations: testedList,
                 });
               } else if (isCatchAll) {

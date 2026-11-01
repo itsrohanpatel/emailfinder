@@ -9,6 +9,7 @@ import {
   AlertTriangle,
   XCircle,
   HelpCircle,
+  Building,
   Loader2,
   ChevronLeft,
   ChevronRight,
@@ -39,7 +40,7 @@ export function ResultsTable() {
   const { contacts, showToast } = useAppStore();
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<
-    'all' | 'found' | 'catch_all' | 'unknown' | 'skipped_no_mx' | 'not_found' | 'pending' | 'error'
+    'all' | 'found' | 'found_role_fallback' | 'catch_all' | 'unknown' | 'skipped_no_mx' | 'not_found' | 'pending' | 'error'
   >('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [copiedId, setCopiedId] = useState<number | null>(null);
@@ -124,6 +125,7 @@ export function ResultsTable() {
               [
                 { id: 'all', label: 'All' },
                 { id: 'found', label: 'Deliverable' },
+                { id: 'found_role_fallback', label: 'HR / Careers' },
                 { id: 'catch_all', label: 'Catch-All' },
                 { id: 'unknown', label: 'Unknown' },
                 { id: 'skipped_no_mx', label: 'No MX' },
@@ -279,6 +281,16 @@ export function ResultsTable() {
                         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/80 shadow-2xs">
                           <CheckCircle2 className="w-3 h-3 text-emerald-600" />
                           <span>Deliverable</span>
+                        </span>
+                      )}
+
+                      {contact.status === 'found_role_fallback' && (
+                        <span
+                          className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200/80 shadow-2xs"
+                          title="Personal email not found; company HR/Careers inbox verified deliverable"
+                        >
+                          <Building className="w-3 h-3 text-indigo-600" />
+                          <span>HR / Careers</span>
                         </span>
                       )}
 

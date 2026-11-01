@@ -199,6 +199,7 @@ export function Controls() {
               apify_keys: activeTokens.join(';'),
               pattern_mode: settings.patternMode,
               key_strategy: settings.keyStrategy,
+              enable_role_fallback: String(settings.enableRoleFallback !== false),
             },
           }),
         }
@@ -244,8 +245,9 @@ export function Controls() {
   const estimate = useMemo(() => getPreFlightEstimate(), [getPreFlightEstimate, contacts, apiKeys, settings]);
 
   // Single-pass computation for stats
-  const { found, notFound, catchAll, unknownCount, noMx, processed, errors } = useMemo(() => {
+  const { found, roleFound, notFound, catchAll, unknownCount, noMx, processed, errors } = useMemo(() => {
     let f = 0;
+    let rf = 0;
     let nf = 0;
     let ca = 0;
     let unk = 0;
@@ -257,6 +259,9 @@ export function Controls() {
       const s = contacts[i].status;
       if (s === 'found') {
         f++;
+        proc++;
+      } else if (s === 'found_role_fallback') {
+        rf++;
         proc++;
       } else if (s === 'not_found') {
         nf++;
@@ -280,6 +285,7 @@ export function Controls() {
 
     return {
       found: f,
+      roleFound: rf,
       notFound: nf,
       catchAll: ca,
       unknownCount: unk,
@@ -294,7 +300,7 @@ export function Controls() {
   const handleExport = (onlyFound: boolean) => {
     let toExport = contacts;
     if (onlyFound) {
-      toExport = contacts.filter(c => c.status === 'found');
+      toExport = contacts.filter(c => c.status === 'found' || c.status === 'found_role_fallback');
       if (toExport.length === 0) {
         showToast({
           type: 'info',
@@ -366,6 +372,19 @@ export function Controls() {
               Deliverable
             </div>
           </div>
+
+          {/* Role / HR Fallback */}
+          {roleFound > 0 && (
+            <div className="px-3 py-1.5 rounded-xl border border-indigo-200/80 bg-indigo-50/60 shadow-2xs">
+              <div className="flex items-center gap-1.5 text-indigo-800 text-xs font-semibold">
+                <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
+                <span className="font-mono text-sm font-bold tabular-nums">{roleFound}</span>
+              </div>
+              <div className="text-[10px] uppercase font-mono font-medium text-indigo-600/80">
+                HR / Careers
+              </div>
+            </div>
+          )}
 
           {/* Catch All */}
           {catchAll > 0 && (

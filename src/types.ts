@@ -10,6 +10,7 @@ export interface Contact {
     | 'pending'
     | 'processing'
     | 'found'
+    | 'found_role_fallback'
     | 'not_found'
     | 'error'
     | 'skipped_missing_info'
@@ -37,6 +38,7 @@ export interface Settings {
   patternMode: PermutationMode;
   keyStrategy: 'failover' | 'round_robin';
   executionTarget: 'local' | 'github_cloud';
+  enableRoleFallback?: boolean;
   githubToken?: string;
   githubRepo?: string;
 }

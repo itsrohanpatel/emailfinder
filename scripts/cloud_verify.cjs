@@ -13,6 +13,7 @@ const patternMode = process.env.INPUT_PATTERN_MODE || 'near_full';
 const keyStrategy = process.env.INPUT_KEY_STRATEGY || 'round_robin';
 const datasetId = process.env.INPUT_DATASET_ID || '';
 const resultsDatasetId = process.env.INPUT_RESULTS_DATASET_ID || '';
+const enableRoleFallback = (process.env.INPUT_ENABLE_ROLE_FALLBACK || 'true').toLowerCase() !== 'false';
 
 const keys = rawKeys
   .split(';')
@@ -56,26 +57,39 @@ function generatePermutations(firstName, lastName, website, mode = 'near_full') 
   const f1 = f ? f[0] : '';
   const l1 = l ? l[0] : '';
 
+  // Single-Initial Smart Mode (e.g. Maggie W):
+  // Generate exactly 3 realistic patterns (maggie.w@, maggiew@, maggie@) with zero duplicates
+  if (l.length === 1) {
+    return Array.from(new Set([
+      `${f}.${l}@${d}`,
+      `${f}${l}@${d}`,
+      `${f}@${d}`
+    ]));
+  }
+
+  let rawList = [];
   if (mode === 'lean') {
-    return [
+    rawList = [
       l ? `${f}.${l}@${d}` : `${f}@${d}`,
       l ? `${f1}${l}@${d}` : `${f}@${d}`,
       `${f}@${d}`,
       l ? `${f}${l}@${d}` : `${f}@${d}`,
     ];
+  } else {
+    // Near-full (Top 8)
+    rawList = [
+      l ? `${f}.${l}@${d}` : `${f}@${d}`,
+      `${f}@${d}`,
+      l ? `${f1}${l}@${d}` : `${f}@${d}`,
+      l ? `${f}${l}@${d}` : `${f}@${d}`,
+      l ? `${f}_${l}@${d}` : `${f}@${d}`,
+      l ? `${f}.${l1}@${d}` : `${f}@${d}`,
+      l ? `${f}${l1}@${d}` : `${f}@${d}`,
+      l ? `${l}.${f}@${d}` : `${f}@${d}`,
+    ];
   }
 
-  // Near-full (Top 8)
-  return [
-    l ? `${f}.${l}@${d}` : `${f}@${d}`,
-    `${f}@${d}`,
-    l ? `${f1}${l}@${d}` : `${f}@${d}`,
-    l ? `${f}${l}@${d}` : `${f}@${d}`,
-    l ? `${f}_${l}@${d}` : `${f}@${d}`,
-    l ? `${f}.${l1}@${d}` : `${f}@${d}`,
-    l ? `${f}${l1}@${d}` : `${f}@${d}`,
-    l ? `${l}.${f}@${d}` : `${f}@${d}`,
-  ];
+  return Array.from(new Set(rawList));
 }
 
 async function checkMx(domain) {
@@ -299,6 +313,43 @@ async function run() {
         if (foundEmail || isCatchAll || isUnknown) break;
       }
 
+      let isRoleFallback = false;
+
+      // Independent HR & Careers Fallback:
+      // If personal permutations yield no match, verify hr@ and careers@ for this contact
+      if (enableRoleFallback && !foundEmail && !isCatchAll && !isUnknown && domain) {
+        const roleCandidates = [`hr@${domain}`, `careers@${domain}`];
+        for (const roleEmail of roleCandidates) {
+          let retries = 0;
+          let done = false;
+          while (retries < 4 && !done) {
+            const check = await verifySingle(assignedToken, roleEmail);
+            if (check.isRateLimit) {
+              await new Promise(r => setTimeout(r, 2000 + Math.random() * 1000));
+              retries++;
+              continue;
+            }
+            if (!check.success) {
+              await new Promise(r => setTimeout(r, 1000));
+              retries++;
+              continue;
+            }
+            done = true;
+            if (check.isCatchAll) {
+              isCatchAll = true;
+              if (domain) domainCache.set(domain, 'CATCH_ALL');
+              break;
+            }
+            if (check.isValid) {
+              foundEmail = roleEmail;
+              isRoleFallback = true;
+              break;
+            }
+          }
+          if (foundEmail || isCatchAll) break;
+        }
+      }
+
       completed++;
 
       let finalStatus = 'not_found';
@@ -307,8 +358,9 @@ async function run() {
 
       if (foundEmail) {
         foundCount++;
-        finalStatus = 'found';
+        finalStatus = isRoleFallback ? 'found_role_fallback' : 'found';
         verifiedEmail = foundEmail;
+        cleanErr = isRoleFallback ? 'Company HR/Careers Fallback' : '';
       } else if (isCatchAll) {
         finalStatus = 'catch_all';
         cleanErr = 'Catch-all server';

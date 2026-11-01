@@ -1,7 +1,7 @@
 import React from 'react';
 import { useAppStore } from '../Store';
 import { PermutationMode } from '../utils/permutation';
-import { Sliders, ShieldCheck, Cpu, Database, RotateCcw, Cloud, Key, Check } from 'lucide-react';
+import { Sliders, ShieldCheck, Cpu, Database, RotateCcw, Cloud, Key, Check, Building } from 'lucide-react';
 
 export function SettingsPanel() {
   const {
@@ -68,6 +68,35 @@ export function SettingsPanel() {
             <div
               className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow-xs transition-transform ${
                 settings.enableDnsPreCheck ? 'translate-x-4.5' : 'translate-x-0.5'
+              }`}
+            ></div>
+          </button>
+        </div>
+
+        {/* HR & Careers Role Fallback Toggle */}
+        <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between gap-2">
+          <div>
+            <div className="text-xs font-semibold text-slate-800 flex items-center gap-1">
+              <Building className="w-3.5 h-3.5 text-indigo-600" />
+              <span>HR & Careers Fallback</span>
+            </div>
+            <div className="text-[11px] text-slate-400 mt-0.5 leading-tight">
+              Tests hr@ and careers@ if personal email permutations yield no match
+            </div>
+          </div>
+          <button
+            type="button"
+            disabled={isProcessing}
+            onClick={() =>
+              setSettings(s => ({ ...s, enableRoleFallback: s.enableRoleFallback === false ? true : false }))
+            }
+            className={`w-9 h-5 rounded-full relative transition-colors cursor-pointer shrink-0 ml-1 ${
+              settings.enableRoleFallback !== false ? 'bg-indigo-600' : 'bg-slate-300'
+            }`}
+          >
+            <div
+              className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow-xs transition-transform ${
+                settings.enableRoleFallback !== false ? 'translate-x-4.5' : 'translate-x-0.5'
               }`}
             ></div>
           </button>
