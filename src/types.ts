@@ -14,7 +14,8 @@ export interface Contact {
     | 'error'
     | 'skipped_missing_info'
     | 'skipped_no_mx'
-    | 'catch_all';
+    | 'catch_all'
+    | 'unknown';
   lastError?: string;
   testedPermutations?: string[];
   originalData: Record<string, any>;

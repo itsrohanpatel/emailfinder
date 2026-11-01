@@ -133,13 +133,34 @@ export async function verifyEmails(
 
     if (!res.ok) {
       const errorMsg = data?.error?.message || `HTTP ${res.status}`;
+      const errorType = data?.error?.type || '';
+      const lowerMsg = errorMsg.toLowerCase();
+
+      const isConcurrency =
+        lowerMsg.includes('concurrent') ||
+        lowerMsg.includes('running too many') ||
+        lowerMsg.includes('rate limit') ||
+        errorType === 'actor-is-already-running-too-many-times' ||
+        errorType === 'rate-limit-exceeded';
+
+      if (res.status === 429 || isConcurrency) {
+        return {
+          success: false,
+          error: errorMsg || 'Apify rate/concurrency limit reached, backing off...',
+          isRateLimit: true,
+        };
+      }
+
       const isExhausted =
-        res.status === 403 ||
         res.status === 402 ||
-        errorMsg.toLowerCase().includes('monthly usage hard limit') ||
-        errorMsg.toLowerCase().includes('quota') ||
-        errorMsg.toLowerCase().includes('credit') ||
-        data?.error?.type === 'platform-feature-disabled';
+        (res.status === 403 &&
+          !isConcurrency &&
+          (lowerMsg.includes('monthly usage') ||
+            lowerMsg.includes('hard limit') ||
+            lowerMsg.includes('quota') ||
+            lowerMsg.includes('credit') ||
+            lowerMsg.includes('billing') ||
+            errorType === 'platform-feature-disabled'));
 
       return { success: false, error: errorMsg, isExhausted };
     }
@@ -148,8 +169,15 @@ export async function verifyEmails(
     if (Array.isArray(data)) {
       // Check for catch-all status on the first returned record
       const firstItem = data[0];
-      const isCatchAll = Boolean(firstItem?.is_catch_all);
-      const isUnknown = firstItem?.status === 'unknown';
+      const isCatchAll =
+        Boolean(firstItem?.is_catch_all) ||
+        firstItem?.status === 'catch-all' ||
+        firstItem?.status === 'accept-all';
+
+      const isUnknown =
+        firstItem?.status === 'unknown' ||
+        firstItem?.result === 'unknown' ||
+        firstItem?.smtp_check === 'unknown';
 
       // Look for a verified valid / deliverable email
       const validItem = data.find(
@@ -179,8 +207,16 @@ export async function verifyEmails(
     }
 
     if (data && typeof data === 'object') {
-      const isCatchAll = Boolean(data.is_catch_all);
-      const isUnknown = data.status === 'unknown';
+      const isCatchAll =
+        Boolean(data.is_catch_all) ||
+        data.status === 'catch-all' ||
+        data.status === 'accept-all';
+
+      const isUnknown =
+        data.status === 'unknown' ||
+        data.result === 'unknown' ||
+        data.smtp_check === 'unknown';
+
       if ((data.status === 'valid' || data.smtp_valid === true) && data.email) {
         return { success: true, validEmail: data.email, isCatchAll, isUnknown, status: data.status };
       }

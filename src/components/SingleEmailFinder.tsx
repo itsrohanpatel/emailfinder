@@ -18,6 +18,7 @@ import {
   AlertTriangle,
   XCircle,
   ShieldCheck,
+  HelpCircle,
   Plus,
   Zap,
 } from 'lucide-react';
@@ -39,7 +40,7 @@ export function SingleEmailFinder() {
 
   const [isSearching, setIsSearching] = useState(false);
   const [result, setResult] = useState<{
-    status: 'idle' | 'found' | 'not_found' | 'catch_all' | 'no_mx' | 'error';
+    status: 'idle' | 'found' | 'not_found' | 'catch_all' | 'unknown' | 'no_mx' | 'error';
     email?: string;
     error?: string;
     permutationsTested?: string[];
@@ -199,11 +200,31 @@ export function SingleEmailFinder() {
 
             if (res.isCatchAll) {
               isCatchAll = true;
+              if (domain) {
+                try {
+                  const raw = localStorage.getItem('veriflow_domain_patterns_v1') || '{}';
+                  const map = JSON.parse(raw);
+                  map[domain] = 'CATCH_ALL';
+                  localStorage.setItem('veriflow_domain_patterns_v1', JSON.stringify(map));
+                } catch (e) {
+                  console.warn(e);
+                }
+              }
               break;
             }
 
             if (res.isUnknown) {
               isUnknown = true;
+              if (domain) {
+                try {
+                  const raw = localStorage.getItem('veriflow_domain_patterns_v1') || '{}';
+                  const map = JSON.parse(raw);
+                  map[domain] = 'UNKNOWN';
+                  localStorage.setItem('veriflow_domain_patterns_v1', JSON.stringify(map));
+                } catch (e) {
+                  console.warn(e);
+                }
+              }
               break;
             }
           } catch (err: any) {
@@ -244,8 +265,8 @@ export function SingleEmailFinder() {
         });
       } else if (isUnknown) {
         setResult({
-          status: 'catch_all',
-          error: `Server responded with unknown / greylisted mailbox. Bailed out to prevent excessive calls.`,
+          status: 'unknown',
+          error: `Domain "${domain}" mail server responded with unknown / greylisted mailbox. Inconclusive SMTP verification. Bailed out to prevent excessive calls.`,
           permutationsTested: tested,
           callsMade: tested.length,
         });
@@ -295,7 +316,14 @@ export function SingleEmailFinder() {
       lastName,
       website: website || normalizeDomain(emailInput),
       email: result.email || emailInput,
-      status: result.status === 'found' ? 'found' : result.status === 'catch_all' ? 'catch_all' : 'not_found',
+      status:
+        result.status === 'found'
+          ? 'found'
+          : result.status === 'catch_all'
+          ? 'catch_all'
+          : result.status === 'unknown'
+          ? 'unknown'
+          : 'not_found',
       testedPermutations: result.permutationsTested,
       originalData: {
         'First Name': firstName,
@@ -521,6 +549,19 @@ export function SingleEmailFinder() {
                 <p className="text-xs text-purple-700 leading-relaxed">{result.error}</p>
                 <div className="mt-2 text-[10px] font-mono text-purple-600">
                   Stopped after Call #{result.callsMade} to prevent unnecessary charges.
+                </div>
+              </div>
+            )}
+
+            {result.status === 'unknown' && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+                <div className="flex items-center gap-2 text-amber-800 text-xs font-bold mb-1">
+                  <HelpCircle className="w-4 h-4 text-amber-600" />
+                  <span>Unknown Domain / Greylisted (Early Bailout Triggered)</span>
+                </div>
+                <p className="text-xs text-amber-700 leading-relaxed">{result.error}</p>
+                <div className="mt-2 text-[10px] font-mono text-amber-600">
+                  Stopped after Call #{result.callsMade} to prevent unnecessary charges. Cached for future contacts.
                 </div>
               </div>
             )}

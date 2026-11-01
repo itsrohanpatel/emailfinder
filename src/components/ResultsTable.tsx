@@ -39,7 +39,7 @@ export function ResultsTable() {
   const { contacts, showToast } = useAppStore();
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<
-    'all' | 'found' | 'not_found' | 'catch_all' | 'skipped_no_mx' | 'error' | 'pending'
+    'all' | 'found' | 'catch_all' | 'unknown' | 'skipped_no_mx' | 'not_found' | 'pending' | 'error'
   >('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [copiedId, setCopiedId] = useState<number | null>(null);
@@ -125,6 +125,7 @@ export function ResultsTable() {
                 { id: 'all', label: 'All' },
                 { id: 'found', label: 'Deliverable' },
                 { id: 'catch_all', label: 'Catch-All' },
+                { id: 'unknown', label: 'Unknown' },
                 { id: 'skipped_no_mx', label: 'No MX' },
                 { id: 'not_found', label: 'Not Found' },
                 { id: 'pending', label: 'Pending' },
@@ -285,6 +286,16 @@ export function ResultsTable() {
                         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-purple-50 text-purple-700 border border-purple-200/80">
                           <AlertTriangle className="w-3 h-3 text-purple-600" />
                           <span>Catch-All</span>
+                        </span>
+                      )}
+
+                      {contact.status === 'unknown' && (
+                        <span
+                          className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-amber-50 text-amber-800 border border-amber-200/80 shadow-2xs"
+                          title={contact.lastError || 'Domain mail server inconclusive / greylisted'}
+                        >
+                          <HelpCircle className="w-3 h-3 text-amber-600" />
+                          <span>Unknown Domain</span>
                         </span>
                       )}
 

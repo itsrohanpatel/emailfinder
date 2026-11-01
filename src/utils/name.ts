@@ -18,3 +18,4 @@ export function parseFullName(raw: string): { firstName: string; lastName: strin
     lastName: tokens[tokens.length - 1],
   };
 }
+

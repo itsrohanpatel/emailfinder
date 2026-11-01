@@ -108,7 +108,7 @@ function loadInitialSettings(): Settings {
   }
 
   return {
-    concurrency: 10,
+    concurrency: 3,
     delayMs: 300,
     reverifyAll: false,
     enableDnsPreCheck: true,
@@ -299,232 +299,273 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const worker = async () => {
       activeWorkersRef.current++;
 
-      while (runIdRef.current === currentRunId) {
-        const contactId = queueRef.current.shift();
-        if (contactId === undefined) {
-          break; // Queue drained
-        }
+      try {
+        while (runIdRef.current === currentRunId) {
+          const contactId = queueRef.current.shift();
+          if (contactId === undefined) {
+            break; // Queue drained
+          }
 
-        const contact = contactsMapRef.current.get(contactId);
-        if (!contact || contact.status !== 'pending') {
-          continue;
-        }
-
-        updateContact(contactId, { status: 'processing' });
-
-        const domain = normalizeDomain(contact.website || contact.email);
-
-        // 1. FREE DNS MX PRE-CHECK
-        if (settings.enableDnsPreCheck && domain && domain.includes('.')) {
-          const mxRes = await checkDomainMx(domain);
-          if (runIdRef.current !== currentRunId) return;
-
-          if (!mxRes.hasMx) {
-            updateContact(contactId, {
-              status: 'skipped_no_mx',
-              lastError: 'Domain has no active MX mail records (0 Apify cost)',
-            });
+          const contact = contactsMapRef.current.get(contactId);
+          if (!contact || contact.status !== 'pending') {
             completedCount++;
             continue;
           }
-        }
 
-        // 2. CHECK IF DOMAIN WAS PREVIOUSLY DETECTED AS CATCH-ALL
-        if (domain && domainPatternCache.current.get(domain) === 'CATCH_ALL') {
-          updateContact(contactId, {
-            status: 'catch_all',
-            lastError: 'Domain mail server is catch-all (unverifiable permutations)',
-          });
-          completedCount++;
-          continue;
-        }
+          try {
+            updateContact(contactId, { status: 'processing' });
 
-        // 3. GENERATE CANDIDATE PERMUTATIONS IN ORDER
-        const standardCandidates = generatePermutations(
-          contact.firstName,
-          contact.lastName,
-          contact.website,
-          contact.email,
-          settings.patternMode
-        );
+            const domain = normalizeDomain(contact.website || contact.email);
 
-        if (standardCandidates.length === 0) {
-          updateContact(contactId, {
-            status: 'skipped_missing_info',
-            lastError: 'Missing name or valid domain',
-          });
-          completedCount++;
-          continue;
-        }
+            // 1. FREE DNS MX PRE-CHECK
+            if (settings.enableDnsPreCheck && domain && domain.includes('.')) {
+              const mxRes = await checkDomainMx(domain);
+              if (runIdRef.current !== currentRunId) return;
 
-        // Check Domain Pattern Memory: Prioritize learned pattern at the front of the list
-        const cachedPattern = domain ? domainPatternCache.current.get(domain) : null;
-        let orderedCandidates = standardCandidates;
+              if (!mxRes.hasMx) {
+                updateContact(contactId, {
+                  status: 'skipped_no_mx',
+                  lastError: 'Domain has no active MX mail records (0 Apify cost)',
+                });
+                completedCount++;
+                continue;
+              }
+            }
 
-        if (cachedPattern && cachedPattern !== 'CATCH_ALL') {
-          const cachedEmail = generateEmailByPattern(
-            contact.firstName,
-            contact.lastName,
-            domain,
-            cachedPattern
-          );
-          orderedCandidates = [
-            cachedEmail,
-            ...standardCandidates.filter(e => e.toLowerCase() !== cachedEmail.toLowerCase()),
-          ];
-        }
-
-        // 4. SEQUENTIAL STOP-ON-MATCH VERIFICATION
-        let foundEmail: string | undefined;
-        let isCatchAll = false;
-        let isUnknown = false;
-        let lastErr: string | undefined;
-        const testedList: string[] = [];
-
-        for (const candidateEmail of orderedCandidates) {
-          if (runIdRef.current !== currentRunId) return;
-
-          let retries = 0;
-          let candidateDone = false;
-
-          while (retries < 3 && !candidateDone && runIdRef.current === currentRunId) {
-            const activeKey = getNextActiveKey();
-            if (!activeKey) {
-              runIdRef.current++;
-              setIsPaused(true);
-              setIsProcessing(false);
-              updateContact(contactId, { status: 'pending' });
-              showToast({
-                type: 'error',
-                title: 'No Active API Keys',
-                description: 'All API keys are exhausted or invalid. Please add a valid Apify API key in the sidebar.',
+            // 2. CHECK IF DOMAIN WAS PREVIOUSLY DETECTED AS CATCH-ALL OR UNKNOWN
+            const cachedDomainType = domain ? domainPatternCache.current.get(domain) : null;
+            if (cachedDomainType === 'CATCH_ALL') {
+              updateContact(contactId, {
+                status: 'catch_all',
+                lastError: 'Domain mail server is catch-all (unverifiable permutations)',
               });
-              return;
+              completedCount++;
+              continue;
             }
-
-            // Verify 1 candidate email at a time
-            const res = await verifyEmails(activeKey.token, [candidateEmail]);
-            if (runIdRef.current !== currentRunId) return;
-
-            if (res.isRateLimit) {
-              await new Promise(r => setTimeout(r, 2000 * Math.pow(2, retries)));
-              retries++;
+            if (cachedDomainType === 'UNKNOWN') {
+              updateContact(contactId, {
+                status: 'unknown',
+                lastError: 'Domain mail server inconclusive / greylisted ($0 Apify cost)',
+              });
+              completedCount++;
               continue;
             }
 
-            if (res.isExhausted) {
-              markKeyExhausted(activeKey.token);
+            // 3. GENERATE CANDIDATE PERMUTATIONS IN ORDER
+            const standardCandidates = generatePermutations(
+              contact.firstName,
+              contact.lastName,
+              contact.website,
+              contact.email,
+              settings.patternMode
+            );
+
+            if (standardCandidates.length === 0) {
+              updateContact(contactId, {
+                status: 'skipped_missing_info',
+                lastError: 'Missing name or valid domain',
+              });
+              completedCount++;
               continue;
             }
 
-            if (!res.success) {
-              lastErr = res.error;
-              if (retries >= 2) {
-                candidateDone = true;
-              } else {
-                await new Promise(r => setTimeout(r, 800));
+            // Check Domain Pattern Memory: Prioritize learned pattern at the front of the list
+            let orderedCandidates = standardCandidates;
+            if (
+              cachedDomainType &&
+              cachedDomainType !== 'CATCH_ALL' &&
+              cachedDomainType !== 'UNKNOWN'
+            ) {
+              const cachedEmail = generateEmailByPattern(
+                contact.firstName,
+                contact.lastName,
+                domain,
+                cachedDomainType
+              );
+              if (cachedEmail) {
+                orderedCandidates = [
+                  cachedEmail,
+                  ...standardCandidates.filter(e => e.toLowerCase() !== cachedEmail.toLowerCase()),
+                ];
               }
-              retries++;
-              continue;
             }
 
-            // Success response for this candidate
-            candidateDone = true;
-            testedList.push(candidateEmail);
+            // 4. SEQUENTIAL STOP-ON-MATCH VERIFICATION
+            let foundEmail: string | undefined;
+            let isCatchAll = false;
+            let isUnknown = false;
+            let lastErr: string | undefined;
+            const testedList: string[] = [];
 
-            // A: Catch-All Bail-Out
-            if (res.isCatchAll) {
-              isCatchAll = true;
-              if (domain) {
-                domainPatternCache.current.set(domain, 'CATCH_ALL');
-                saveDomainCache();
-              }
-              break; // Stop testing further candidates!
-            }
+            for (const candidateEmail of orderedCandidates) {
+              if (runIdRef.current !== currentRunId) return;
 
-            // B: Match Found! Stop immediately!
-            if (res.validEmail) {
-              foundEmail = res.validEmail;
+              let retries = 0;
+              let candidateDone = false;
 
-              // Learn the company pattern for subsequent contacts
-              if (domain && contact.firstName) {
-                const emailUser = res.validEmail.split('@')[0];
-                const detectedPat = detectPattern(emailUser, contact.firstName, contact.lastName);
-                if (detectedPat) {
-                  domainPatternCache.current.set(domain, detectedPat);
-                  saveDomainCache();
+              while (retries < 5 && !candidateDone && runIdRef.current === currentRunId) {
+                const activeKey = getNextActiveKey();
+                if (!activeKey) {
+                  // Wait up to 2 seconds before pausing in case key availability updates
+                  await new Promise(r => setTimeout(r, 1500));
+                  const retryKey = getNextActiveKey();
+                  if (!retryKey && runIdRef.current === currentRunId) {
+                    runIdRef.current++;
+                    setIsPaused(true);
+                    setIsProcessing(false);
+                    updateContact(contactId, { status: 'pending' });
+                    // Return contact back to queue so it's not lost
+                    queueRef.current.unshift(contactId);
+                    showToast({
+                      type: 'error',
+                      title: 'No Active API Keys',
+                      description: 'All API keys are exhausted or invalid. Please add a valid Apify API key in the sidebar.',
+                    });
+                    return;
+                  }
+                  continue;
                 }
+
+                // Verify 1 candidate email at a time
+                const res = await verifyEmails(activeKey.token, [candidateEmail]);
+                if (runIdRef.current !== currentRunId) return;
+
+                if (res.isRateLimit) {
+                  // Concurrency or rate limit: jitter backoff and retry this candidate without marking key exhausted
+                  const backoff = 1500 * Math.pow(1.5, retries) + Math.random() * 800;
+                  await new Promise(r => setTimeout(r, backoff));
+                  retries++;
+                  continue;
+                }
+
+                if (res.isExhausted) {
+                  markKeyExhausted(activeKey.token);
+                  continue;
+                }
+
+                if (!res.success) {
+                  lastErr = res.error;
+                  if (retries >= 3) {
+                    candidateDone = true;
+                  } else {
+                    await new Promise(r => setTimeout(r, 1000));
+                  }
+                  retries++;
+                  continue;
+                }
+
+                // Success response for this candidate
+                candidateDone = true;
+                testedList.push(candidateEmail);
+
+                // A: Catch-All Bail-Out
+                if (res.isCatchAll) {
+                  isCatchAll = true;
+                  if (domain) {
+                    domainPatternCache.current.set(domain, 'CATCH_ALL');
+                    saveDomainCache();
+                  }
+                  break; // Stop testing further candidates!
+                }
+
+                // B: Match Found! Stop immediately!
+                if (res.validEmail) {
+                  foundEmail = res.validEmail;
+
+                  // Learn the company pattern for subsequent contacts
+                  if (domain && contact.firstName) {
+                    const emailUser = res.validEmail.split('@')[0];
+                    const detectedPat = detectPattern(emailUser, contact.firstName, contact.lastName);
+                    if (detectedPat) {
+                      domainPatternCache.current.set(domain, detectedPat);
+                      saveDomainCache();
+                    }
+                  }
+                  break; // STOP ON FIRST MATCH!
+                }
+
+                // C: Status Unknown / Inconclusive Domain Bail-Out
+                if (res.isUnknown) {
+                  isUnknown = true;
+                  if (domain) {
+                    domainPatternCache.current.set(domain, 'UNKNOWN');
+                    saveDomainCache();
+                  }
+                  break; // Stop testing further candidates!
+                }
+
+                // D: Status Invalid -> Loop advances to next candidate permutation
               }
-              break; // STOP ON FIRST MATCH!
+
+              if (foundEmail || isCatchAll || isUnknown) {
+                break;
+              }
+
+              // Optional worker delay between sequential candidate checks
+              if (settings.delayMs > 0 && runIdRef.current === currentRunId) {
+                await new Promise(r => setTimeout(r, settings.delayMs));
+              }
             }
 
-            // C: Status Unknown / Accept-All Bail-Out
-            if (res.isUnknown) {
-              isUnknown = true;
-              break;
+            // Record contact result
+            if (runIdRef.current === currentRunId) {
+              if (foundEmail) {
+                updateContact(contactId, {
+                  status: 'found',
+                  email: foundEmail,
+                  testedPermutations: testedList,
+                });
+              } else if (isCatchAll) {
+                updateContact(contactId, {
+                  status: 'catch_all',
+                  lastError: 'Domain is catch-all (mailbox verified as accept-all)',
+                  testedPermutations: testedList,
+                });
+              } else if (isUnknown) {
+                updateContact(contactId, {
+                  status: 'unknown',
+                  lastError: 'Domain mail server inconclusive / greylisted (unknown domain)',
+                  testedPermutations: testedList,
+                });
+              } else {
+                updateContact(contactId, {
+                  status: 'not_found',
+                  lastError: lastErr,
+                  testedPermutations: testedList,
+                });
+              }
+
+              completedCount++;
+
+              const elapsedSec = (Date.now() - startTime) / 1000;
+              if (completedCount > 0 && elapsedSec > 2) {
+                const ratePerSec = completedCount / elapsedSec;
+                const remaining = Math.max(0, initialTotal - completedCount);
+                setEstimatedRemainingSec(Math.round(remaining / ratePerSec));
+              }
             }
-
-            // D: Status Invalid -> Loop advances to next candidate permutation
-          }
-
-          if (foundEmail || isCatchAll || isUnknown) {
-            break;
-          }
-
-          // Optional worker delay between sequential candidate checks
-          if (settings.delayMs > 0 && runIdRef.current === currentRunId) {
-            await new Promise(r => setTimeout(r, settings.delayMs));
+          } catch (itemErr: any) {
+            console.error(`Error processing contact ${contactId}:`, itemErr);
+            updateContact(contactId, {
+              status: 'error',
+              lastError: itemErr?.message || 'Processing error',
+            });
+            completedCount++;
           }
         }
-
-        // Record contact result
-        if (runIdRef.current === currentRunId) {
-          if (foundEmail) {
-            updateContact(contactId, {
-              status: 'found',
-              email: foundEmail,
-              testedPermutations: testedList,
-            });
-          } else if (isCatchAll) {
-            updateContact(contactId, {
-              status: 'catch_all',
-              lastError: 'Domain is catch-all (mailbox verified as accept-all)',
-              testedPermutations: testedList,
-            });
-          } else if (isUnknown) {
-            updateContact(contactId, {
-              status: 'not_found',
-              lastError: 'Mailbox status unknown or accept-all',
-              testedPermutations: testedList,
-            });
-          } else {
-            updateContact(contactId, {
-              status: 'not_found',
-              lastError: lastErr,
-              testedPermutations: testedList,
-            });
-          }
-
-          completedCount++;
-
-          const elapsedSec = (Date.now() - startTime) / 1000;
-          if (completedCount > 0 && elapsedSec > 2) {
-            const ratePerSec = completedCount / elapsedSec;
-            const remaining = Math.max(0, initialTotal - completedCount);
-            setEstimatedRemainingSec(Math.round(remaining / ratePerSec));
-          }
+      } catch (fatalWorkerErr) {
+        console.error('Fatal worker error:', fatalWorkerErr);
+      } finally {
+        activeWorkersRef.current--;
+        if (activeWorkersRef.current <= 0 && runIdRef.current === currentRunId) {
+          setIsProcessing(false);
+          setEstimatedRemainingSec(null);
+          showToast({
+            type: 'success',
+            title: 'Verification Complete',
+            description: `Finished processing all ${initialTotal} contacts.`,
+          });
         }
-      }
-
-      activeWorkersRef.current--;
-      if (activeWorkersRef.current <= 0 && runIdRef.current === currentRunId) {
-        setIsProcessing(false);
-        setEstimatedRemainingSec(null);
-        showToast({
-          type: 'success',
-          title: 'Verification Complete',
-          description: 'Finished processing all contacts in queue.',
-        });
       }
     };
 

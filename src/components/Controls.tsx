@@ -35,10 +35,11 @@ export function Controls() {
   };
 
   // Single-pass computation for stats
-  const { found, notFound, catchAll, noMx, processed, errors } = useMemo(() => {
+  const { found, notFound, catchAll, unknownCount, noMx, processed, errors } = useMemo(() => {
     let f = 0;
     let nf = 0;
     let ca = 0;
+    let unk = 0;
     let nm = 0;
     let proc = 0;
     let err = 0;
@@ -54,6 +55,9 @@ export function Controls() {
       } else if (s === 'catch_all') {
         ca++;
         proc++;
+      } else if (s === 'unknown') {
+        unk++;
+        proc++;
       } else if (s === 'skipped_no_mx') {
         nm++;
         proc++;
@@ -65,7 +69,15 @@ export function Controls() {
       }
     }
 
-    return { found: f, notFound: nf, catchAll: ca, noMx: nm, processed: proc, errors: err };
+    return {
+      found: f,
+      notFound: nf,
+      catchAll: ca,
+      unknownCount: unk,
+      noMx: nm,
+      processed: proc,
+      errors: err,
+    };
   }, [contacts]);
 
   const percentage = total > 0 ? (processed / total) * 100 : 0;
@@ -155,6 +167,19 @@ export function Controls() {
               </div>
               <div className="text-[10px] uppercase font-mono font-medium text-purple-600/80">
                 Catch-All
+              </div>
+            </div>
+          )}
+
+          {/* Unknown Domain */}
+          {unknownCount > 0 && (
+            <div className="px-3 py-1.5 rounded-xl border border-amber-200/80 bg-amber-50/60 shadow-2xs">
+              <div className="flex items-center gap-1.5 text-amber-800 text-xs font-semibold">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                <span className="font-mono text-sm font-bold tabular-nums">{unknownCount}</span>
+              </div>
+              <div className="text-[10px] uppercase font-mono font-medium text-amber-700/80">
+                Unknown
               </div>
             </div>
           )}

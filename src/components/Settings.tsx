@@ -102,6 +102,9 @@ export function SettingsPanel() {
             <span>1 worker</span>
             <span>15 max parallel</span>
           </div>
+          <span className="text-[10px] text-slate-400 mt-1 block leading-tight">
+            Recommended: 3–5 workers for standard Apify accounts (max 5 concurrent runs).
+          </span>
         </div>
 
         {/* Worker Delay */}
