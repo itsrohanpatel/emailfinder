@@ -1,7 +1,7 @@
 import React from 'react';
 import { useAppStore } from '../Store';
 import { PermutationMode } from '../utils/permutation';
-import { Sliders, ShieldCheck, Cpu, Database, RotateCcw } from 'lucide-react';
+import { Sliders, ShieldCheck, Cpu, Database, RotateCcw, Cloud, Key, Check } from 'lucide-react';
 
 export function SettingsPanel() {
   const {
@@ -196,6 +196,54 @@ export function SettingsPanel() {
               <span>Reset Domain Cache</span>
             </button>
           )}
+        </div>
+
+        {/* GitHub Cloud Runner Configuration */}
+        <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-2xs">
+          <div className="flex items-center justify-between text-xs mb-1.5">
+            <span className="text-slate-800 font-semibold flex items-center gap-1">
+              <Cloud className="w-3.5 h-3.5 text-indigo-600" />
+              <span>GitHub Cloud Runner</span>
+            </span>
+            <span
+              className={`text-[9px] font-mono font-bold px-2 py-0.5 rounded-full uppercase ${
+                settings.githubToken && settings.githubRepo
+                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                  : 'bg-slate-100 text-slate-500 border border-slate-200'
+              }`}
+            >
+              {settings.githubToken && settings.githubRepo ? 'Connected' : 'Optional'}
+            </span>
+          </div>
+
+          <div className="text-[11px] text-slate-400 mb-2.5 leading-tight">
+            Offload long-running verification jobs to GitHub Actions cloud runners with gigabit connection.
+          </div>
+
+          <div className="space-y-2">
+            <div>
+              <label className="block text-[10px] font-mono text-slate-500 mb-1">GitHub Repo (owner/repo)</label>
+              <input
+                type="text"
+                placeholder="e.g. yourname/email-finder-github"
+                value={settings.githubRepo || ''}
+                disabled={isProcessing}
+                onChange={e => setSettings(s => ({ ...s, githubRepo: e.target.value.trim() }))}
+                className="w-full text-xs font-mono bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:bg-white focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-mono text-slate-500 mb-1">GitHub Token (PAT with repo access)</label>
+              <input
+                type="password"
+                placeholder="ghp_••••••••••••••••••••••••••••••••"
+                value={settings.githubToken || ''}
+                disabled={isProcessing}
+                onChange={e => setSettings(s => ({ ...s, githubToken: e.target.value.trim() }))}
+                className="w-full text-xs font-mono bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:bg-white focus:outline-none focus:border-blue-500"
+              />
+            </div>
+          </div>
         </div>
       </div>
     </section>

@@ -1,0 +1,66 @@
+name: Veriflow Cloud Email Verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      contacts_json:
+        description: 'JSON array of contacts to verify'
+        required: true
+        type: string
+      apify_keys:
+        description: 'Semicolon-separated Apify API tokens'
+        required: true
+        type: string
+      pattern_mode:
+        description: 'Permutation Mode (near_full, lean, exhaustive)'
+        required: false
+        default: 'near_full'
+        type: string
+      key_strategy:
+        description: 'Key Routing (round_robin or failover)'
+        required: false
+        default: 'round_robin'
+        type: string
+      dataset_id:
+        description: 'Optional Apify Dataset ID to stream real-time progress to'
+        required: false
+        default: ''
+        type: string
+
+jobs:
+  verify:
+    name: Headless Cloud Verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Cloud Verification Engine
+        env:
+          INPUT_CONTACTS: ${{ inputs.contacts_json }}
+          INPUT_KEYS: ${{ inputs.apify_keys }}
+          INPUT_PATTERN_MODE: ${{ inputs.pattern_mode }}
+          INPUT_KEY_STRATEGY: ${{ inputs.key_strategy }}
+          INPUT_DATASET_ID: ${{ inputs.dataset_id }}
+        run: node scripts/cloud_verify.cjs
+
+      - name: Upload Verified Results Artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: veriflow-verified-leads
+          path: |
+            output/veriflow_verified_leads.xlsx
+            output/veriflow_verified_leads.csv
+          retention-days: 14

@@ -35,4 +35,20 @@ export interface Settings {
   reverifyAll: boolean;
   enableDnsPreCheck: boolean;
   patternMode: PermutationMode;
+  keyStrategy: 'failover' | 'round_robin';
+  executionTarget: 'local' | 'github_cloud';
+  githubToken?: string;
+  githubRepo?: string;
+}
+
+export interface PreFlightEstimate {
+  totalContacts: number;
+  expectedCalls: number;
+  worstCaseCalls: number;
+  expectedCostUsd: number;
+  worstCaseCostUsd: number;
+  availableCreditsUsd: number;
+  isSufficient: boolean;
+  shortageUsd: number;
+  recommendedKeysToAdd: number;
 }

@@ -5,11 +5,20 @@ import { ApiKey } from '../types';
 import { Key, Plus, RefreshCw, Eye, EyeOff, Trash2, CheckCircle2, AlertCircle } from 'lucide-react';
 
 export function KeyManager() {
-  const { apiKeys, setApiKeys, showToast } = useAppStore();
+  const { apiKeys, setApiKeys, settings, setSettings, showToast } = useAppStore();
   const [newKeys, setNewKeys] = useState('');
   const [isChecking, setIsChecking] = useState(false);
   const [showAdd, setShowAdd] = useState(apiKeys.length === 0);
   const [showTokens, setShowTokens] = useState(false);
+
+  // Compute total aggregate credits
+  const totalBalance = apiKeys.reduce((acc, k) => {
+    if (k.status === 'active' || k.status === 'unchecked') {
+      return acc + (k.creditsRemaining ?? 5.0);
+    }
+    return acc;
+  }, 0);
+  const estimatedLeadsCapacity = Math.round(totalBalance / (2.0 * 0.00089));
 
   const checkKeys = useCallback(
     async (keysToCheck: ApiKey[]) => {
@@ -133,6 +142,57 @@ export function KeyManager() {
           </button>
         </div>
       </div>
+
+      {/* Aggregate Balance & Multiplier Badge */}
+      {apiKeys.length > 0 && (
+        <div className="mb-3 p-2.5 bg-gradient-to-br from-slate-50 to-blue-50/40 border border-slate-200 rounded-xl shadow-2xs">
+          <div className="flex items-center justify-between text-xs mb-1">
+            <span className="text-[11px] font-medium text-slate-500">Total Available Balance:</span>
+            <span className="font-mono font-bold text-slate-900">${totalBalance.toFixed(2)} USD</span>
+          </div>
+          <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono">
+            <span>Capacity: ~{estimatedLeadsCapacity.toLocaleString()} leads</span>
+            <span className="text-emerald-700 font-semibold bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200">
+              {settings.keyStrategy === 'round_robin'
+                ? `${Math.min(activeCount * 3, 15)}x Multiplier Active`
+                : 'Failover Mode'}
+            </span>
+          </div>
+
+          {/* Strategy Toggle */}
+          {apiKeys.length > 1 && (
+            <div className="mt-2 pt-2 border-t border-slate-200/60 flex items-center justify-between gap-1">
+              <span className="text-[10px] text-slate-500 font-medium">Rotation Mode:</span>
+              <div className="flex bg-slate-200/60 p-0.5 rounded-lg text-[10px] font-mono">
+                <button
+                  type="button"
+                  onClick={() => setSettings(s => ({ ...s, keyStrategy: 'round_robin' }))}
+                  className={`px-2 py-0.5 rounded-md transition-all cursor-pointer ${
+                    settings.keyStrategy === 'round_robin'
+                      ? 'bg-white text-blue-700 font-bold shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                  title="Stripes worker calls across all keys simultaneously for max speed"
+                >
+                  Round-Robin
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSettings(s => ({ ...s, keyStrategy: 'failover' }))}
+                  className={`px-2 py-0.5 rounded-md transition-all cursor-pointer ${
+                    settings.keyStrategy === 'failover'
+                      ? 'bg-white text-blue-700 font-bold shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                  title="Uses Key 1 until $0, then rotates to Key 2"
+                >
+                  Failover
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="space-y-2.5">
         {showAdd && (

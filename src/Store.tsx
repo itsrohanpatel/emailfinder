@@ -6,13 +6,14 @@ import React, {
   useCallback,
   useRef,
 } from 'react';
-import { Contact, ApiKey, Settings } from './types';
+import { Contact, ApiKey, Settings, PreFlightEstimate } from './types';
 import { ToastItem } from './components/Toast';
 import {
   generatePermutations,
   normalizeDomain,
   detectPattern,
   generateEmailByPattern,
+  PermutationMode,
 } from './utils/permutation';
 import { verifyEmails, getDefaultApiKey } from './utils/apify';
 import { checkDomainMx } from './utils/dns';
@@ -43,6 +44,7 @@ interface AppContextType extends AppState {
   stopProcessing: () => void;
   clearContacts: () => void;
   clearDomainCache: () => void;
+  getPreFlightEstimate: () => PreFlightEstimate;
   showToast: (toast: Omit<ToastItem, 'id'>) => void;
   dismissToast: (id: string) => void;
 }
@@ -88,6 +90,52 @@ function loadInitialKeys(): ApiKey[] {
   return [];
 }
 
+export function computePreFlightEstimate(
+  contacts: Contact[],
+  apiKeys: ApiKey[],
+  patternMode: PermutationMode
+): PreFlightEstimate {
+  const pending = contacts.filter(c => c.status === 'pending');
+  const count = pending.length;
+
+  const maxPerms = patternMode === 'lean' ? 4 : patternMode === 'exhaustive' ? 14 : 8;
+  const avgCallsPerLead = 2.0;
+  const costPerCall = 0.00089;
+
+  const expectedCalls = Math.round(count * avgCallsPerLead);
+  const worstCaseCalls = count * maxPerms;
+
+  const expectedCostUsd = Number((expectedCalls * costPerCall).toFixed(4));
+  const worstCaseCostUsd = Number((worstCaseCalls * costPerCall).toFixed(4));
+
+  const activeKeys = apiKeys.filter(k => k.status === 'active' || k.status === 'unchecked');
+  let totalCredits = 0;
+  for (const k of activeKeys) {
+    if (typeof k.creditsRemaining === 'number') {
+      totalCredits += k.creditsRemaining;
+    } else {
+      totalCredits += 5.0; // Assume fresh $5.00 free tier if unchecked
+    }
+  }
+  totalCredits = Number(totalCredits.toFixed(4));
+
+  const isSufficient = totalCredits >= expectedCostUsd;
+  const shortageUsd = isSufficient ? 0 : Number((expectedCostUsd - totalCredits).toFixed(4));
+  const recommendedKeysToAdd = isSufficient ? 0 : Math.ceil(shortageUsd / 5.0);
+
+  return {
+    totalContacts: count,
+    expectedCalls,
+    worstCaseCalls,
+    expectedCostUsd,
+    worstCaseCostUsd,
+    availableCreditsUsd: totalCredits,
+    isSufficient,
+    shortageUsd,
+    recommendedKeysToAdd,
+  };
+}
+
 function loadInitialSettings(): Settings {
   try {
     const raw = localStorage.getItem(STORAGE_SETTINGS);
@@ -106,6 +154,10 @@ function loadInitialSettings(): Settings {
           reverifyAll: Boolean(parsed.reverifyAll),
           enableDnsPreCheck: parsed.enableDnsPreCheck ?? true,
           patternMode: parsed.patternMode || 'near_full',
+          keyStrategy: parsed.keyStrategy === 'failover' ? 'failover' : 'round_robin',
+          executionTarget: parsed.executionTarget === 'github_cloud' ? 'github_cloud' : 'local',
+          githubToken: parsed.githubToken || '',
+          githubRepo: parsed.githubRepo || '',
         };
       }
     }
@@ -119,6 +171,10 @@ function loadInitialSettings(): Settings {
     reverifyAll: false,
     enableDnsPreCheck: true,
     patternMode: 'near_full',
+    keyStrategy: 'round_robin',
+    executionTarget: 'local',
+    githubToken: '',
+    githubRepo: '',
   };
 }
 
@@ -254,10 +310,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
   }, [showToast]);
 
+  const roundRobinKeyIndexRef = useRef<number>(0);
+
   const getNextActiveKey = useCallback((): ApiKey | null => {
-    const currentList = keysRef.current;
-    return currentList.find(k => k.status === 'active' || k.status === 'unchecked') || null;
-  }, []);
+    const active = keysRef.current.filter(k => k.status === 'active' || k.status === 'unchecked');
+    if (active.length === 0) return null;
+
+    if (settings.keyStrategy === 'round_robin') {
+      const idx = Math.abs(roundRobinKeyIndexRef.current++) % active.length;
+      return active[idx];
+    } else {
+      return active[0];
+    }
+  }, [settings.keyStrategy]);
 
   const stopProcessing = useCallback(() => {
     runIdRef.current++;
@@ -575,7 +640,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     };
 
-    const workerCount = Math.min(settings.concurrency, pendingIds.length);
+    const activeKeyCount = Math.max(
+      1,
+      keysRef.current.filter(k => k.status === 'active' || k.status === 'unchecked').length
+    );
+    // In round-robin mode, 3 workers per active key multiplies throughput safely
+    const safeWorkerLimit =
+      settings.keyStrategy === 'round_robin'
+        ? Math.min(activeKeyCount * 3, 15)
+        : settings.concurrency;
+
+    const workerCount = Math.min(safeWorkerLimit, pendingIds.length);
     for (let i = 0; i < workerCount; i++) {
       worker();
     }
@@ -587,6 +662,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     settings,
     updateContact,
   ]);
+
+  const getPreFlightEstimate = useCallback((): PreFlightEstimate => {
+    return computePreFlightEstimate(contacts, apiKeys, settings.patternMode);
+  }, [contacts, apiKeys, settings.patternMode]);
 
   const startProcessing = useCallback(() => {
     processQueue();
@@ -626,6 +705,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         stopProcessing,
         clearContacts,
         clearDomainCache,
+        getPreFlightEstimate,
         showToast,
         dismissToast,
       }}

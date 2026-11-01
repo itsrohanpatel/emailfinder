@@ -1,12 +1,30 @@
-import React, { useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import Papa from 'papaparse';
 import { useAppStore } from '../Store';
-import { Play, Pause, Square, Download, Trash2, CheckCircle2, ShieldAlert, AlertTriangle, Layers } from 'lucide-react';
+import {
+  Play,
+  Pause,
+  Square,
+  Download,
+  Trash2,
+  CheckCircle2,
+  ShieldAlert,
+  AlertTriangle,
+  Layers,
+  Cloud,
+  Cpu,
+  Zap,
+  X,
+  ShieldCheck,
+  Check,
+} from 'lucide-react';
 
 export function Controls() {
   const {
     contacts,
     apiKeys,
+    settings,
+    setSettings,
     isProcessing,
     isPaused,
     startProcessing,
@@ -14,15 +32,21 @@ export function Controls() {
     resumeProcessing,
     stopProcessing,
     clearContacts,
+    getPreFlightEstimate,
     showToast,
   } = useAppStore();
+
+  const [showPreFlight, setShowPreFlight] = useState(false);
+  const [isDispatchingCloud, setIsDispatchingCloud] = useState(false);
+  const [githubRepoInput, setGithubRepoInput] = useState(settings.githubRepo || '');
+  const [githubTokenInput, setGithubTokenInput] = useState(settings.githubToken || '');
 
   const total = contacts.length;
   if (total === 0) return null;
 
   const activeKey = apiKeys.find(k => k.status === 'active' || k.status === 'unchecked');
 
-  const handleStart = () => {
+  const handleStartClick = () => {
     if (!activeKey) {
       showToast({
         type: 'error',
@@ -31,8 +55,95 @@ export function Controls() {
       });
       return;
     }
+
+    const estimate = getPreFlightEstimate();
+    // For lists with >10 pending contacts, show Pre-Flight Budget Guard
+    if (estimate.totalContacts > 10) {
+      setShowPreFlight(true);
+    } else {
+      startProcessing();
+    }
+  };
+
+  const handleConfirmLocalLaunch = () => {
+    setShowPreFlight(false);
     startProcessing();
   };
+
+  const handleConfirmCloudLaunch = async () => {
+    if (!githubTokenInput.trim() || !githubRepoInput.trim()) {
+      showToast({
+        type: 'error',
+        title: 'Missing GitHub Configuration',
+        description: 'Please provide both your GitHub Token and Repository (owner/repo).',
+      });
+      return;
+    }
+
+    // Save tokens in settings
+    setSettings(s => ({
+      ...s,
+      githubRepo: githubRepoInput.trim(),
+      githubToken: githubTokenInput.trim(),
+      executionTarget: 'github_cloud',
+    }));
+
+    setIsDispatchingCloud(true);
+
+    try {
+      const activeTokens = apiKeys
+        .filter(k => k.status === 'active' || k.status === 'unchecked')
+        .map(k => k.token);
+
+      const res = await fetch(
+        `https://api.github.com/repos/${githubRepoInput.trim()}/actions/workflows/verify.yml/dispatches`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${githubTokenInput.trim()}`,
+            Accept: 'application/vnd.github.v3+json',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            ref: 'main',
+            inputs: {
+              contacts_json: JSON.stringify(contacts.filter(c => c.status === 'pending')),
+              apify_keys: activeTokens.join(';'),
+              pattern_mode: settings.patternMode,
+              key_strategy: settings.keyStrategy,
+            },
+          }),
+        }
+      );
+
+      setIsDispatchingCloud(false);
+      setShowPreFlight(false);
+
+      if (res.status === 204) {
+        showToast({
+          type: 'success',
+          title: 'GitHub Cloud Runner Dispatched!',
+          description: 'Running headless on GitHub Actions. You can safely close this browser or turn off Wi-Fi.',
+        });
+      } else {
+        const data = await res.json().catch(() => ({}));
+        showToast({
+          type: 'error',
+          title: 'GitHub Dispatch Failed',
+          description: data?.message || `HTTP ${res.status}: Check repo name and workflow token permissions.`,
+        });
+      }
+    } catch (err: any) {
+      setIsDispatchingCloud(false);
+      showToast({
+        type: 'error',
+        title: 'Dispatch Error',
+        description: err?.message || 'Failed connecting to GitHub API.',
+      });
+    }
+  };
+
+  const estimate = useMemo(() => getPreFlightEstimate(), [getPreFlightEstimate, contacts, apiKeys, settings]);
 
   // Single-pass computation for stats
   const { found, notFound, catchAll, unknownCount, noMx, processed, errors } = useMemo(() => {
@@ -246,7 +357,7 @@ export function Controls() {
       <div className="flex flex-wrap items-center gap-2.5 pt-1">
         {!isProcessing && !isPaused && (
           <button
-            onClick={handleStart}
+            onClick={handleStartClick}
             disabled={processed === total}
             className="flex-1 min-w-[200px] flex items-center justify-center gap-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:opacity-40 text-white py-2 px-5 rounded-xl font-semibold text-xs transition-all shadow-xs active:scale-[0.98] cursor-pointer"
           >
@@ -313,6 +424,219 @@ export function Controls() {
           <span>Clear List</span>
         </button>
       </div>
+
+      {/* Pre-Flight Cost & Quota Guard Modal */}
+      {showPreFlight && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white border border-slate-200/90 rounded-2xl shadow-xl max-w-lg w-full overflow-hidden">
+            {/* Header */}
+            <div className="px-6 py-4 bg-slate-50/80 border-b border-slate-200/80 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-blue-600" />
+                <h3 className="text-sm font-bold text-slate-900 tracking-tight">
+                  Pre-Flight Budget & Routing Guard
+                </h3>
+              </div>
+              <button
+                onClick={() => setShowPreFlight(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 space-y-4">
+              {/* Stat Cards */}
+              <div className="grid grid-cols-3 gap-3">
+                <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-xl">
+                  <div className="text-[10px] uppercase font-mono text-slate-400 font-semibold">Pending Leads</div>
+                  <div className="font-mono text-lg font-bold text-slate-900 mt-0.5">{estimate.totalContacts}</div>
+                </div>
+
+                <div className="p-3 bg-blue-50/60 border border-blue-200/80 rounded-xl">
+                  <div className="text-[10px] uppercase font-mono text-blue-600 font-semibold">Expected Cost</div>
+                  <div className="font-mono text-lg font-bold text-blue-900 mt-0.5">${estimate.expectedCostUsd}</div>
+                  <div className="text-[9px] text-blue-500 font-mono">~$0.0018/lead</div>
+                </div>
+
+                <div className="p-3 bg-emerald-50/60 border border-emerald-200/80 rounded-xl">
+                  <div className="text-[10px] uppercase font-mono text-emerald-700 font-semibold">Key Credits</div>
+                  <div className="font-mono text-lg font-bold text-emerald-900 mt-0.5">${estimate.availableCreditsUsd}</div>
+                  <div className="text-[9px] text-emerald-600 font-mono">
+                    {apiKeys.filter(k => k.status === 'active' || k.status === 'unchecked').length} active keys
+                  </div>
+                </div>
+              </div>
+
+              {/* Balance Assessment Banner */}
+              {estimate.isSufficient ? (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-start gap-2.5">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                  <div>
+                    <div className="text-xs font-bold text-emerald-900">Sufficient API Balance Available</div>
+                    <div className="text-[11px] text-emerald-700 mt-0.5 leading-relaxed">
+                      Your configured Apify keys have ample balance (${estimate.availableCreditsUsd} USD) to complete all {estimate.totalContacts} leads.
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-2.5">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <div className="text-xs font-bold text-amber-900">Potential Balance Shortage (${estimate.shortageUsd} USD)</div>
+                    <div className="text-[11px] text-amber-700 mt-0.5 leading-relaxed">
+                      You need ~${estimate.expectedCostUsd} USD. Please add {estimate.recommendedKeysToAdd} more free Apify key in the sidebar to guarantee all leads finish smoothly.
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Execution Target Selector */}
+              <div className="border border-slate-200 rounded-xl p-3 bg-white">
+                <div className="text-xs font-bold text-slate-800 mb-2 flex items-center justify-between">
+                  <span>Execution Target</span>
+                  <span className="text-[10px] font-mono font-medium text-slate-400">Where should workers run?</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSettings(s => ({ ...s, executionTarget: 'local' }))}
+                    className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                      settings.executionTarget === 'local'
+                        ? 'bg-blue-50/60 border-blue-300 text-blue-900 shadow-2xs font-semibold'
+                        : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 text-xs font-bold">
+                      <Cpu className="w-3.5 h-3.5 text-blue-600" />
+                      <span>Local Browser</span>
+                    </div>
+                    <div className="text-[10px] text-slate-500 mt-1 leading-tight font-normal">
+                      Runs directly in this tab. Fast, zero setup required.
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setSettings(s => ({ ...s, executionTarget: 'github_cloud' }))}
+                    className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                      settings.executionTarget === 'github_cloud'
+                        ? 'bg-indigo-50/60 border-indigo-300 text-indigo-900 shadow-2xs font-semibold'
+                        : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 text-xs font-bold">
+                      <Cloud className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>GitHub Actions Cloud</span>
+                    </div>
+                    <div className="text-[10px] text-slate-500 mt-1 leading-tight font-normal">
+                      Runs on gigabit cloud runner. Laptop can close anytime.
+                    </div>
+                  </button>
+                </div>
+
+                {settings.executionTarget === 'github_cloud' && (
+                  <div className="mt-3 pt-3 border-t border-slate-100 space-y-2">
+                    <div>
+                      <label className="block text-[10px] font-mono text-slate-500 mb-1">GitHub Repo (owner/repo)</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. yourname/email-finder-github"
+                        value={githubRepoInput}
+                        onChange={e => setGithubRepoInput(e.target.value)}
+                        className="w-full text-xs font-mono bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:bg-white focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-mono text-slate-500 mb-1">GitHub Personal Access Token (PAT with repo scope)</label>
+                      <input
+                        type="password"
+                        placeholder="ghp_••••••••••••••••••••••••••••••••••••"
+                        value={githubTokenInput}
+                        onChange={e => setGithubTokenInput(e.target.value)}
+                        className="w-full text-xs font-mono bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:bg-white focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Key Rotation Strategy */}
+              <div className="border border-slate-200 rounded-xl p-3 bg-white flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-xs font-bold text-slate-800 flex items-center gap-1">
+                    <Zap className="w-3.5 h-3.5 text-amber-500 fill-amber-500" />
+                    <span>Multi-Key Strategy</span>
+                  </div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">
+                    {settings.keyStrategy === 'round_robin'
+                      ? 'Parallel striping: 3 workers per active key simultaneously.'
+                      : 'Sequential failover: Uses Key 1 until $0, then Key 2.'}
+                  </div>
+                </div>
+
+                <div className="flex bg-slate-100 p-0.5 rounded-lg text-xs font-mono">
+                  <button
+                    type="button"
+                    onClick={() => setSettings(s => ({ ...s, keyStrategy: 'round_robin' }))}
+                    className={`px-2.5 py-1 rounded-md text-[11px] transition-all cursor-pointer ${
+                      settings.keyStrategy === 'round_robin'
+                        ? 'bg-white text-blue-700 font-bold shadow-2xs'
+                        : 'text-slate-600'
+                    }`}
+                  >
+                    ★ Round-Robin
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSettings(s => ({ ...s, keyStrategy: 'failover' }))}
+                    className={`px-2.5 py-1 rounded-md text-[11px] transition-all cursor-pointer ${
+                      settings.keyStrategy === 'failover'
+                        ? 'bg-white text-blue-700 font-bold shadow-2xs'
+                        : 'text-slate-600'
+                    }`}
+                  >
+                    Failover
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer Actions */}
+            <div className="px-6 py-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setShowPreFlight(false)}
+                className="px-4 py-2 border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 rounded-xl text-xs font-semibold cursor-pointer active:scale-[0.98]"
+              >
+                Cancel
+              </button>
+
+              {settings.executionTarget === 'local' ? (
+                <button
+                  type="button"
+                  onClick={handleConfirmLocalLaunch}
+                  className="px-5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl text-xs font-semibold shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-[0.98]"
+                >
+                  <Play className="w-3.5 h-3.5 fill-current" />
+                  <span>Launch Local Verification</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleConfirmCloudLaunch}
+                  disabled={isDispatchingCloud}
+                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl text-xs font-semibold shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-[0.98]"
+                >
+                  <Cloud className="w-3.5 h-3.5" />
+                  <span>{isDispatchingCloud ? 'Dispatching to Cloud...' : 'Dispatch to GitHub Cloud'}</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
