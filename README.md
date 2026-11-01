@@ -63,9 +63,48 @@ npm run build
 
 This repository includes `.github/workflows/verify.yml` for running verification in the cloud:
 
-1. Open **Settings** in the web app and enter your GitHub repository (`itsrohanpatel/emailfinder`) and a GitHub Personal Access Token (PAT with `repo` scope).
-2. Click **Start Verification** and select **Run in GitHub Cloud Actions**.
+1. Open **Settings** in the web app and enter your GitHub repository (`itsrohanpatel/emailfinder`) and a GitHub Personal Access Token (PAT).
+2. Click **Start Verification** and select **Run in GitHub Cloud Actions** in the Pre-Flight modal.
 3. The job runs headless on GitHub's gigabit cloud runners and saves the final Excel file (`veriflow_verified_leads.xlsx`) in GitHub Workflow Artifacts.
+
+---
+
+## How to Create a GitHub Token for Cloud Execution
+
+VeriFlow uses GitHub's official REST API (`api.github.com`) to dispatch `.github/workflows/verify.yml` and retrieve run status. Your token is stored only in your browser's `localStorage` and never sent to any third party.
+
+Choose either a **Fine-Grained Token** (recommended) or a **Classic Token**:
+
+### Option 1: Fine-Grained Token (Recommended)
+
+1. Go to [GitHub Fine-Grained Tokens](https://github.com/settings/personal-access-tokens/new).
+2. **Token name**: `VeriFlow Cloud Runner`
+3. **Expiration**: Choose 30, 90, or 365 days.
+4. **Repository access**: Select **"Only select repositories"** and choose your repository (e.g., `emailfinder`).
+5. **Permissions**: Under **Repository permissions**, configure:
+   - **Actions**: Select **Read and write** (needed to trigger and monitor `workflow_dispatch`).
+6. Click **Generate token** at the bottom.
+7. Copy the token (starts with `github_pat_`).
+
+### Option 2: Classic Token (Quick Setup)
+
+1. Go to [GitHub Classic Tokens](https://github.com/settings/tokens/new).
+2. **Note**: `VeriFlow Cloud Runner`
+3. **Expiration**: Select your preferred expiry.
+4. **Select scopes**:
+   - For **Private** repositories: Check `repo` (Full control of private repositories).
+   - For **Public** repositories: Check `workflow` (Update GitHub Action workflows).
+5. Click **Generate token** at the bottom.
+6. Copy the token (starts with `ghp_`).
+
+### Connecting to VeriFlow
+
+1. Open the VeriFlow web app.
+2. Click **Settings** (gear icon) in the navigation bar.
+3. Under **GitHub Cloud Runner**:
+   - **Repository**: Enter your repository in `owner/repo` format (e.g. `itsrohanpatel/emailfinder`).
+   - **Personal Access Token**: Paste your copied GitHub token.
+4. Now when you upload a spreadsheet and click **Start Verification**, select **Run in GitHub Cloud Actions** to run batches entirely in the cloud!
 
 ---
 
