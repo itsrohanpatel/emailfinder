@@ -120,8 +120,9 @@ async function verifySingle(token, email) {
     if (res.status === 429) return { isRateLimit: true };
     if (!res.ok) {
       const errData = await res.json().catch(() => ({}));
-      const msg = errData?.error?.message || `HTTP ${res.status}`;
-      if (res.status === 403 && (msg.includes('concurrent') || msg.includes('running too many'))) {
+      const msg = String(errData?.error?.message || `HTTP ${res.status}`);
+      const lower = msg.toLowerCase();
+      if (lower.includes('concurrent') || lower.includes('running too many') || lower.includes('rate limit')) {
         return { isRateLimit: true };
       }
       return { success: false, error: msg };
@@ -189,11 +190,14 @@ async function run() {
   let foundCount = 0;
 
   const queue = contacts.map((c, idx) => ({ ...c, originalIndex: idx }));
-  const concurrency = Math.min(keys.length * 3, 15);
+  const WORKERS_PER_KEY = 2; // Strict cap of 2 concurrent workers per Apify account (prevents ever hitting 5 cap)
+  const concurrency = Math.min(keys.length * WORKERS_PER_KEY, 12);
 
-  console.log(`[Cloud Runner] Starting verification pool with ${concurrency} parallel workers...`);
+  console.log(`[Cloud Runner] Starting verification pool with ${concurrency} parallel workers (${WORKERS_PER_KEY} per Apify account)...`);
 
-  async function worker() {
+  async function worker(workerId) {
+    const assignedToken = keys[workerId % keys.length];
+
     while (queue.length > 0) {
       const contact = queue.shift();
       if (!contact) break;
@@ -237,12 +241,11 @@ async function run() {
         let retries = 0;
         let done = false;
 
-        while (retries < 4 && !done) {
-          const token = getNextKey();
-          const check = await verifySingle(token, candidate);
+        while (retries < 5 && !done) {
+          const check = await verifySingle(assignedToken, candidate);
 
           if (check.isRateLimit) {
-            await new Promise(r => setTimeout(r, 1500 * Math.pow(1.5, retries)));
+            await new Promise(r => setTimeout(r, 2000 + Math.random() * 1500));
             retries++;
             continue;
           }
@@ -287,7 +290,10 @@ async function run() {
       } else if (isUnknown) {
         results.push({ ...contact, status: 'unknown', email: '', lastError: 'Inconclusive / greylisted domain' });
       } else {
-        results.push({ ...contact, status: 'not_found', email: '', lastError: lastErr || 'No match' });
+        const cleanErr = (lastErr || '').toLowerCase().includes('concurrent') || (lastErr || '').toLowerCase().includes('limit')
+          ? 'Verification inconclusive'
+          : (lastErr || 'No match');
+        results.push({ ...contact, status: 'not_found', email: '', lastError: cleanErr });
       }
 
       if (completed % 10 === 0 || completed === total) {
@@ -296,7 +302,7 @@ async function run() {
     }
   }
 
-  const workers = Array.from({ length: concurrency }, () => worker());
+  const workers = Array.from({ length: concurrency }, (_, i) => worker(i));
   await Promise.all(workers);
 
   // Export Results
