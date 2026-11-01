@@ -87,23 +87,41 @@ export function SettingsPanel() {
           <input
             type="range"
             className="w-full accent-blue-600 cursor-pointer"
-            value={settings.concurrency}
+            value={Math.min(5, settings.concurrency)}
             min="1"
-            max="15"
+            max="5"
             disabled={isProcessing}
             onChange={e =>
               setSettings(s => ({
                 ...s,
-                concurrency: Math.min(15, Math.max(1, parseInt(e.target.value) || 1)),
+                concurrency: Math.min(5, Math.max(1, parseInt(e.target.value) || 1)),
               }))
             }
           />
           <div className="flex justify-between text-[10px] text-slate-400 font-mono mt-1">
             <span>1 worker</span>
-            <span>15 max parallel</span>
+            <span>3 (optimum)</span>
+            <span>5 max (Apify cap)</span>
           </div>
-          <span className="text-[10px] text-slate-400 mt-1 block leading-tight">
-            Recommended: 3–5 workers for standard Apify accounts (max 5 concurrent runs).
+          <div className="flex gap-1.5 mt-2">
+            {[1, 3, 5].map(cnt => (
+              <button
+                key={cnt}
+                type="button"
+                disabled={isProcessing}
+                onClick={() => setSettings(s => ({ ...s, concurrency: cnt }))}
+                className={`flex-1 py-1 rounded-md text-[10px] font-mono font-medium border transition-all cursor-pointer ${
+                  settings.concurrency === cnt
+                    ? 'bg-blue-50 text-blue-700 border-blue-300 font-bold'
+                    : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                }`}
+              >
+                {cnt} {cnt === 3 ? '★ Recommended' : cnt === 5 ? 'Max Cap' : 'Thread'}
+              </button>
+            ))}
+          </div>
+          <span className="text-[10px] text-slate-400 mt-1.5 block leading-tight">
+            Apify enforces a 5 concurrent run cap. 3 threads prevents 429 rate limits and runs with zero stalls.
           </span>
         </div>
 

@@ -94,8 +94,14 @@ function loadInitialSettings(): Settings {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (parsed && typeof parsed.concurrency === 'number') {
+        // Migrate legacy 10 or excessive concurrency to safe Apify cap 3
+        const safeConcurrency =
+          parsed.concurrency > 5 || parsed.concurrency === 10
+            ? 3
+            : Math.max(1, parsed.concurrency);
+
         return {
-          concurrency: Math.min(20, Math.max(1, parsed.concurrency)),
+          concurrency: safeConcurrency,
           delayMs: Math.max(0, parsed.delayMs ?? 300),
           reverifyAll: Boolean(parsed.reverifyAll),
           enableDnsPreCheck: parsed.enableDnsPreCheck ?? true,
