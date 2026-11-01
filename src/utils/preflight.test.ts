@@ -96,3 +96,4 @@ describe('computePreFlightEstimate', () => {
     expect(estimate.availableCreditsUsd).toBe(2.5);
   });
 });
+
