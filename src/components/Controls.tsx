@@ -92,6 +92,29 @@ export function Controls() {
       return;
     }
 
+    const activeTokens = apiKeys
+      .filter(k => k.status === 'active' || k.status === 'unchecked')
+      .map(k => k.token);
+
+    if (activeTokens.length === 0) {
+      showToast({
+        type: 'error',
+        title: 'No Active Apify API Key',
+        description: 'Please add your Apify API Token (starts with apify_api_...) in the left sidebar under API Keys so GitHub Actions can verify emails.',
+      });
+      return;
+    }
+
+    const pendingContacts = contacts.filter(c => c.status === 'pending');
+    if (pendingContacts.length === 0) {
+      showToast({
+        type: 'error',
+        title: 'No Pending Contacts',
+        description: 'There are no pending contacts left to verify in this list.',
+      });
+      return;
+    }
+
     // Save tokens in settings
     setSettings(s => ({
       ...s,
@@ -103,10 +126,6 @@ export function Controls() {
     setIsDispatchingCloud(true);
 
     try {
-      const activeTokens = apiKeys
-        .filter(k => k.status === 'active' || k.status === 'unchecked')
-        .map(k => k.token);
-
       const res = await fetch(
         `https://api.github.com/repos/${cleanRepo}/actions/workflows/verify.yml/dispatches`,
         {
@@ -119,7 +138,7 @@ export function Controls() {
           body: JSON.stringify({
             ref: 'main',
             inputs: {
-              contacts_json: JSON.stringify(contacts.filter(c => c.status === 'pending')),
+              contacts_json: JSON.stringify(pendingContacts),
               apify_keys: activeTokens.join(';'),
               pattern_mode: settings.patternMode,
               key_strategy: settings.keyStrategy,
@@ -138,11 +157,18 @@ export function Controls() {
           description: 'Running headless on GitHub Actions. You can safely close this browser or turn off Wi-Fi.',
         });
       } else {
-        const data = await res.json().catch(() => ({}));
+        const text = await res.text().catch(() => '');
+        let errDesc = '';
+        try {
+          const data = JSON.parse(text);
+          errDesc = data?.message || text;
+        } catch {
+          errDesc = text;
+        }
         showToast({
           type: 'error',
-          title: 'GitHub Dispatch Failed',
-          description: data?.message || `HTTP ${res.status}: Check repo name and workflow token permissions.`,
+          title: `GitHub Dispatch Failed (${res.status})`,
+          description: errDesc || 'Check repo name and workflow token permissions.',
         });
       }
     } catch (err: any) {

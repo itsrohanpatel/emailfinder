@@ -8,8 +8,9 @@ on:
         required: true
         type: string
       apify_keys:
-        description: 'Semicolon-separated Apify API tokens'
-        required: true
+        description: 'Semicolon-separated Apify API tokens (or set APIFY_API_KEY secret)'
+        required: false
+        default: ''
         type: string
       pattern_mode:
         description: 'Permutation Mode (near_full, lean, exhaustive)'
@@ -49,7 +50,7 @@ jobs:
       - name: Run Cloud Verification Engine
         env:
           INPUT_CONTACTS: ${{ inputs.contacts_json }}
-          INPUT_KEYS: ${{ inputs.apify_keys }}
+          INPUT_KEYS: ${{ inputs.apify_keys || secrets.APIFY_API_KEY }}
           INPUT_PATTERN_MODE: ${{ inputs.pattern_mode }}
           INPUT_KEY_STRATEGY: ${{ inputs.key_strategy }}
           INPUT_DATASET_ID: ${{ inputs.dataset_id }}

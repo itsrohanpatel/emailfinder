@@ -8,7 +8,7 @@ const XLSX = require('xlsx');
 
 // Configuration from Environment
 const rawContacts = process.env.INPUT_CONTACTS || '[]';
-const rawKeys = process.env.INPUT_KEYS || '';
+const rawKeys = process.env.INPUT_KEYS || process.env.APIFY_API_KEYS || process.env.APIFY_API_KEY || '';
 const patternMode = process.env.INPUT_PATTERN_MODE || 'near_full';
 const keyStrategy = process.env.INPUT_KEY_STRATEGY || 'round_robin';
 const datasetId = process.env.INPUT_DATASET_ID || '';
