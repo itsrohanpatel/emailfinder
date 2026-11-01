@@ -7,3 +7,6 @@ coverage/
 !.env.example
 *.zip
 output/
+*.csv
+*.xlsx
+*.xls
