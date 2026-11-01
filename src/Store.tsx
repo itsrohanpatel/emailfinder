@@ -29,6 +29,7 @@ interface AppState {
   settings: Settings;
   isProcessing: boolean;
   isPaused: boolean;
+  isCloudRunning: boolean;
   estimatedRemainingSec: number | null;
   learnedDomainsCount: number;
   toasts: ToastItem[];
@@ -42,6 +43,8 @@ interface AppContextType extends AppState {
   pauseProcessing: () => void;
   resumeProcessing: () => void;
   stopProcessing: () => void;
+  startCloudSync: (resultsDatasetId: string, totalCount: number, primaryToken: string) => void;
+  stopCloudSync: () => void;
   clearContacts: () => void;
   clearDomainCache: () => void;
   getPreFlightEstimate: () => PreFlightEstimate;
@@ -200,17 +203,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
+  const [isCloudRunning, setIsCloudRunning] = useState(false);
+  const [cloudDatasetInfo, setCloudDatasetInfo] = useState<{ resultsDatasetId: string; token: string; total: number } | null>(() => {
+    try {
+      const saved = localStorage.getItem('veriflow_cloud_job');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
   const [estimatedRemainingSec, setEstimatedRemainingSec] = useState<number | null>(null);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
-
-  // Persist contacts to localStorage
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_CONTACTS, JSON.stringify(contacts));
-    } catch (e) {
-      console.warn('LocalStorage save failed for contacts:', e);
-    }
-  }, [contacts]);
 
   const showToast = useCallback((toast: Omit<ToastItem, 'id'>) => {
     const id = Math.random().toString(36).substring(2, 9);
@@ -223,6 +227,105 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const dismissToast = useCallback((id: string) => {
     setToasts(prev => prev.filter(t => t.id !== id));
   }, []);
+
+  const startCloudSync = useCallback((resultsDatasetId: string, totalCount: number, primaryToken: string) => {
+    const info = { resultsDatasetId, total: totalCount, token: primaryToken };
+    setIsCloudRunning(true);
+    setCloudDatasetInfo(info);
+    try {
+      localStorage.setItem('veriflow_cloud_job', JSON.stringify(info));
+    } catch {}
+  }, []);
+
+  const stopCloudSync = useCallback(() => {
+    setIsCloudRunning(false);
+    setCloudDatasetInfo(null);
+    try {
+      localStorage.removeItem('veriflow_cloud_job');
+    } catch {}
+  }, []);
+
+  // Resume cloud syncing on reload if an active job was saved
+  useEffect(() => {
+    if (cloudDatasetInfo && !isCloudRunning) {
+      setIsCloudRunning(true);
+    }
+  }, [cloudDatasetInfo, isCloudRunning]);
+
+  // Real-Time Bi-Directional Cloud Polling Loop
+  useEffect(() => {
+    if (!isCloudRunning || !cloudDatasetInfo) return;
+
+    let offset = 0;
+    let pollTimer: any = null;
+    let isCancelled = false;
+
+    const poll = async () => {
+      if (isCancelled) return;
+      try {
+        const url = `https://api.apify.com/v2/datasets/${cloudDatasetInfo.resultsDatasetId}/items?token=${cloudDatasetInfo.token}&offset=${offset}&limit=500`;
+        const res = await fetch(url);
+        if (res.ok) {
+          const newItems = await res.json();
+          if (Array.isArray(newItems) && newItems.length > 0) {
+            offset += newItems.length;
+
+            setContacts(prev => {
+              const map = new Map<any, any>();
+              for (const it of newItems) {
+                if (it.id !== undefined) map.set(it.id, it);
+              }
+
+              return prev.map(c => {
+                const match = map.get(c.id);
+                if (match) {
+                  return {
+                    ...c,
+                    status: match.status,
+                    email: match.email || c.email,
+                    lastError: match.lastError || '',
+                  };
+                }
+                return c;
+              });
+            });
+
+            if (offset >= cloudDatasetInfo.total) {
+              stopCloudSync();
+              showToast({
+                type: 'success',
+                title: 'Cloud Run Completed!',
+                description: `All ${offset}/${cloudDatasetInfo.total} contacts processed and updated live.`,
+              });
+              return;
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Real-time cloud poll warning:', err);
+      }
+
+      if (!isCancelled) {
+        pollTimer = setTimeout(poll, 2000);
+      }
+    };
+
+    poll();
+
+    return () => {
+      isCancelled = true;
+      if (pollTimer) clearTimeout(pollTimer);
+    };
+  }, [isCloudRunning, cloudDatasetInfo, stopCloudSync, showToast]);
+
+  // Persist contacts to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_CONTACTS, JSON.stringify(contacts));
+    } catch (e) {
+      console.warn('LocalStorage save failed for contacts:', e);
+    }
+  }, [contacts]);
 
   // Synchronous atomic queue for concurrency
   const queueRef = useRef<number[]>([]);
@@ -696,6 +799,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setSettings,
         isProcessing,
         isPaused,
+        isCloudRunning,
         estimatedRemainingSec,
         learnedDomainsCount,
         toasts,
@@ -703,6 +807,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         pauseProcessing,
         resumeProcessing,
         stopProcessing,
+        startCloudSync,
+        stopCloudSync,
         clearContacts,
         clearDomainCache,
         getPreFlightEstimate,

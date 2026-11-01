@@ -27,10 +27,13 @@ export function Controls() {
     setSettings,
     isProcessing,
     isPaused,
+    isCloudRunning,
     startProcessing,
     pauseProcessing,
     resumeProcessing,
     stopProcessing,
+    startCloudSync,
+    stopCloudSync,
     clearContacts,
     getPreFlightEstimate,
     showToast,
@@ -127,6 +130,7 @@ export function Controls() {
 
     try {
       let datasetId = '';
+      let resultsDatasetId = '';
       const primaryKey = activeTokens[0];
 
       // Always stage contacts via Apify Dataset to completely bypass GitHub Actions 64KB input limit
@@ -144,6 +148,15 @@ export function Controls() {
         });
         const dsData = await dsRes.json();
         datasetId = dsData?.data?.id || '';
+
+        // Create a dedicated dataset for bi-directional real-time browser streaming
+        const resDsRes = await fetch(`https://api.apify.com/v2/datasets?token=${primaryKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: `veriflow-results-${Date.now()}` }),
+        });
+        const resDsData = await resDsRes.json();
+        resultsDatasetId = resDsData?.data?.id || '';
 
         if (datasetId) {
           // Upload in chunks of 500 contacts
@@ -182,6 +195,7 @@ export function Controls() {
             inputs: {
               contacts_json: safeContactsJson,
               dataset_id: datasetId,
+              results_dataset_id: resultsDatasetId,
               apify_keys: activeTokens.join(';'),
               pattern_mode: settings.patternMode,
               key_strategy: settings.keyStrategy,
@@ -194,10 +208,13 @@ export function Controls() {
       setShowPreFlight(false);
 
       if (res.status === 204) {
+        if (resultsDatasetId) {
+          startCloudSync(resultsDatasetId, pendingContacts.length, primaryKey);
+        }
         showToast({
           type: 'success',
-          title: 'GitHub Cloud Runner Dispatched!',
-          description: 'Running headless on GitHub Actions. You can safely close this browser or turn off Wi-Fi.',
+          title: 'GitHub Cloud Runner Live!',
+          description: 'Streaming real-time results directly to your browser. You can also safely close this tab anytime.',
         });
       } else {
         const text = await res.text().catch(() => '');
@@ -434,16 +451,49 @@ export function Controls() {
         ></div>
       </div>
 
+      {/* Cloud Runner Active Live Banner */}
+      {isCloudRunning && (
+        <div className="bg-gradient-to-r from-indigo-50 via-blue-50 to-sky-50 border border-blue-200 rounded-xl p-3 flex items-center justify-between gap-3 shadow-2xs">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+              <Cloud className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="text-xs font-bold text-slate-800 flex items-center gap-2">
+                <span>GitHub Actions Cloud Runner Active</span>
+                <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                <span className="text-[10px] text-emerald-700 font-mono font-medium uppercase tracking-wider">● Streaming Live</span>
+              </div>
+              <div className="text-[11px] text-slate-500 mt-0.5">
+                Streaming verified contacts live into your table. You can safely keep this tab open or close it anytime.
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={stopCloudSync}
+            className="text-xs font-mono font-medium text-slate-600 hover:text-slate-900 bg-white border border-slate-200 px-3 py-1.5 rounded-lg shadow-2xs hover:bg-slate-50 cursor-pointer"
+          >
+            Disconnect Stream
+          </button>
+        </div>
+      )}
+
       {/* Action Button Strip */}
       <div className="flex flex-wrap items-center gap-2.5 pt-1">
         {!isProcessing && !isPaused && (
           <button
             onClick={handleStartClick}
-            disabled={processed === total}
+            disabled={processed === total || isCloudRunning}
             className="flex-1 min-w-[200px] flex items-center justify-center gap-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:opacity-40 text-white py-2 px-5 rounded-xl font-semibold text-xs transition-all shadow-xs active:scale-[0.98] cursor-pointer"
           >
             <Play className="w-3.5 h-3.5 fill-current" />
-            <span>{processed === total ? 'ALL CONTACTS COMPLETED' : 'START VERIFICATION'}</span>
+            <span>
+              {isCloudRunning
+                ? 'CLOUD RUNNING (STREAMING LIVE)'
+                : processed === total
+                ? 'ALL CONTACTS COMPLETED'
+                : 'START VERIFICATION'}
+            </span>
           </button>
         )}
 

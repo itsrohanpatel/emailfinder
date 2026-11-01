@@ -24,6 +24,11 @@ on:
         default: 'round_robin'
         type: string
       dataset_id:
+        description: 'Optional Apify Dataset ID to read input contacts from'
+        required: false
+        default: ''
+        type: string
+      results_dataset_id:
         description: 'Optional Apify Dataset ID to stream real-time progress to'
         required: false
         default: ''
@@ -55,6 +60,7 @@ jobs:
           INPUT_PATTERN_MODE: ${{ inputs.pattern_mode }}
           INPUT_KEY_STRATEGY: ${{ inputs.key_strategy }}
           INPUT_DATASET_ID: ${{ inputs.dataset_id }}
+          INPUT_RESULTS_DATASET_ID: ${{ inputs.results_dataset_id }}
         run: node scripts/cloud_verify.cjs
 
       - name: Upload Verified Results Artifact

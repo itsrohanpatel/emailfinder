@@ -12,6 +12,7 @@ const rawKeys = process.env.INPUT_KEYS || process.env.APIFY_API_KEYS || process.
 const patternMode = process.env.INPUT_PATTERN_MODE || 'near_full';
 const keyStrategy = process.env.INPUT_KEY_STRATEGY || 'round_robin';
 const datasetId = process.env.INPUT_DATASET_ID || '';
+const resultsDatasetId = process.env.INPUT_RESULTS_DATASET_ID || '';
 
 const keys = rawKeys
   .split(';')
@@ -188,6 +189,21 @@ async function run() {
   const total = contacts.length;
   let completed = 0;
   let foundCount = 0;
+  let streamBuffer = [];
+
+  function pushStreamItem(item) {
+    if (!resultsDatasetId || keys.length === 0) return;
+    streamBuffer.push(item);
+    if (streamBuffer.length >= 2 || completed === total) {
+      const toFlush = [...streamBuffer];
+      streamBuffer = [];
+      fetch(`https://api.apify.com/v2/datasets/${resultsDatasetId}/items?token=${keys[0]}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(toFlush),
+      }).catch(err => console.warn('[Stream Push Error]', err.message));
+    }
+  }
 
   const queue = contacts.map((c, idx) => ({ ...c, originalIndex: idx }));
   const WORKERS_PER_KEY = 2; // Strict cap of 2 concurrent workers per Apify account (prevents ever hitting 5 cap)
@@ -209,6 +225,7 @@ async function run() {
         const hasMx = await checkMx(domain);
         if (!hasMx) {
           results.push({ ...contact, status: 'skipped_no_mx', email: '', lastError: 'No active MX records ($0)' });
+          pushStreamItem({ id: contact.id, status: 'skipped_no_mx', email: '', lastError: 'No active MX records ($0)' });
           completed++;
           continue;
         }
@@ -218,11 +235,13 @@ async function run() {
       const cached = domainCache.get(domain);
       if (cached === 'CATCH_ALL') {
         results.push({ ...contact, status: 'catch_all', email: '', lastError: 'Domain is catch-all ($0)' });
+        pushStreamItem({ id: contact.id, status: 'catch_all', email: '', lastError: 'Domain is catch-all ($0)' });
         completed++;
         continue;
       }
       if (cached === 'UNKNOWN') {
         results.push({ ...contact, status: 'unknown', email: '', lastError: 'Domain inconclusive / greylisted ($0)' });
+        pushStreamItem({ id: contact.id, status: 'unknown', email: '', lastError: 'Domain inconclusive / greylisted ($0)' });
         completed++;
         continue;
       }
@@ -282,19 +301,28 @@ async function run() {
 
       completed++;
 
+      let finalStatus = 'not_found';
+      let verifiedEmail = '';
+      let cleanErr = '';
+
       if (foundEmail) {
         foundCount++;
-        results.push({ ...contact, status: 'found', email: foundEmail, lastError: '' });
+        finalStatus = 'found';
+        verifiedEmail = foundEmail;
       } else if (isCatchAll) {
-        results.push({ ...contact, status: 'catch_all', email: '', lastError: 'Catch-all server' });
+        finalStatus = 'catch_all';
+        cleanErr = 'Catch-all server';
       } else if (isUnknown) {
-        results.push({ ...contact, status: 'unknown', email: '', lastError: 'Inconclusive / greylisted domain' });
+        finalStatus = 'unknown';
+        cleanErr = 'Inconclusive / greylisted domain';
       } else {
-        const cleanErr = (lastErr || '').toLowerCase().includes('concurrent') || (lastErr || '').toLowerCase().includes('limit')
+        cleanErr = (lastErr || '').toLowerCase().includes('concurrent') || (lastErr || '').toLowerCase().includes('limit')
           ? 'Verification inconclusive'
           : (lastErr || 'No match');
-        results.push({ ...contact, status: 'not_found', email: '', lastError: cleanErr });
       }
+
+      results.push({ ...contact, status: finalStatus, email: verifiedEmail, lastError: cleanErr });
+      pushStreamItem({ id: contact.id, status: finalStatus, email: verifiedEmail, lastError: cleanErr });
 
       if (completed % 10 === 0 || completed === total) {
         console.log(`[Progress] ${completed}/${total} processed (${((completed / total) * 100).toFixed(1)}%) - Found: ${foundCount}`);
@@ -304,6 +332,16 @@ async function run() {
 
   const workers = Array.from({ length: concurrency }, (_, i) => worker(i));
   await Promise.all(workers);
+
+  if (streamBuffer.length > 0 && resultsDatasetId && keys.length > 0) {
+    const finalFlush = [...streamBuffer];
+    streamBuffer = [];
+    await fetch(`https://api.apify.com/v2/datasets/${resultsDatasetId}/items?token=${keys[0]}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(finalFlush),
+    }).catch(() => {});
+  }
 
   // Export Results
   console.log('[Cloud Runner] All contacts processed. Exporting Excel & CSV...');
