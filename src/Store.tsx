@@ -242,6 +242,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const stopCloudSync = useCallback(() => {
     setIsCloudRunning(false);
     setCloudDatasetInfo(null);
+    setEstimatedRemainingSec(null);
     try {
       localStorage.removeItem('veriflow_cloud_job');
     } catch {}
@@ -261,6 +262,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     let offset = 0;
     let pollTimer: any = null;
     let isCancelled = false;
+    const cloudStartTime = Date.now();
 
     const poll = async () => {
       if (isCancelled) return;
@@ -271,6 +273,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           const newItems = await res.json();
           if (Array.isArray(newItems) && newItems.length > 0) {
             offset += newItems.length;
+
+            const elapsedSec = (Date.now() - cloudStartTime) / 1000;
+            if (offset > 0 && elapsedSec > 2) {
+              const ratePerSec = offset / elapsedSec;
+              const remaining = Math.max(0, cloudDatasetInfo.total - offset);
+              setEstimatedRemainingSec(Math.round(remaining / ratePerSec));
+            }
 
             setContacts(prev => {
               const map = new Map<any, any>();

@@ -21,7 +21,7 @@ function formatRemainingTime(seconds: number | null, isProcessing: boolean): str
 }
 
 function AppContent() {
-  const { isProcessing, isPaused, contacts, estimatedRemainingSec, toasts, dismissToast, settings } =
+  const { isProcessing, isCloudRunning, isPaused, contacts, estimatedRemainingSec, toasts, dismissToast, settings } =
     useAppStore();
   const [activeTab, setActiveTab] = useState<'single' | 'bulk'>(() => {
     try {
@@ -184,12 +184,12 @@ function AppContent() {
         <div className="flex gap-4 text-[11px] font-mono text-slate-500">
           <span className="flex items-center gap-1">
             <Cpu className="w-3 h-3 text-slate-400" />
-            WORKERS: <b className="text-slate-700">{settings.concurrency}</b>
+            WORKERS: <b className="text-slate-700">{isCloudRunning ? 'Cloud Pool' : settings.concurrency}</b>
           </span>
           <span>
             ETA:{' '}
             <b className="text-slate-700 tabular-nums">
-              {formatRemainingTime(estimatedRemainingSec, isProcessing)}
+              {formatRemainingTime(estimatedRemainingSec, isProcessing || isCloudRunning)}
             </b>
           </span>
           <span>
