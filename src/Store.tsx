@@ -101,7 +101,7 @@ export function computePreFlightEstimate(
   const pending = contacts.filter(c => c.status === 'pending');
   const count = pending.length;
 
-  const maxPerms = patternMode === 'lean' ? 4 : patternMode === 'exhaustive' ? 14 : 8;
+  const maxPerms = patternMode === 'lean' ? 4 : patternMode === 'exhaustive' ? 16 : 8;
   const avgCallsPerLead = 2.0;
   const costPerCall = 0.00089;
 
@@ -156,6 +156,7 @@ function loadInitialSettings(): Settings {
           delayMs: Math.max(0, parsed.delayMs ?? 300),
           reverifyAll: Boolean(parsed.reverifyAll),
           enableDnsPreCheck: parsed.enableDnsPreCheck ?? true,
+          enableRoleFallback: parsed.enableRoleFallback ?? true,
           patternMode: parsed.patternMode || 'near_full',
           keyStrategy: parsed.keyStrategy === 'failover' ? 'failover' : 'round_robin',
           executionTarget: parsed.executionTarget === 'github_cloud' ? 'github_cloud' : 'local',
@@ -402,11 +403,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setApiKeys(prev =>
       prev.map(k => (k.token === token ? { ...k, status: 'exhausted', creditsRemaining: 0 } : k))
     );
-    const inRef = keysRef.current.find(k => k.token === token);
-    if (inRef) {
-      inRef.status = 'exhausted';
-      inRef.creditsRemaining = 0;
-    }
+    keysRef.current = keysRef.current.map(k =>
+      k.token === token ? { ...k, status: 'exhausted', creditsRemaining: 0 } : k
+    );
     showToast({
       type: 'warning',
       title: 'API Key Rotated',
@@ -573,7 +572,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             const testedList: string[] = [];
 
             for (const candidateEmail of orderedCandidates) {
-              if (runIdRef.current !== currentRunId) return;
+              if (runIdRef.current !== currentRunId) {
+                const current = contactsMapRef.current.get(contactId);
+                if (current && current.status === 'processing') {
+                  updateContact(contactId, { status: 'pending' });
+                  if (!queueRef.current.includes(contactId)) {
+                    queueRef.current.unshift(contactId);
+                  }
+                }
+                return;
+              }
 
               let retries = 0;
               let candidateDone = false;
@@ -588,9 +596,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                     runIdRef.current++;
                     setIsPaused(true);
                     setIsProcessing(false);
-                    updateContact(contactId, { status: 'pending' });
-                    // Return contact back to queue so it's not lost
-                    queueRef.current.unshift(contactId);
+
+                    // Reset all currently processing contacts back to pending so parallel workers don't abandon them
+                    setContacts(prev =>
+                      prev.map(c => (c.status === 'processing' ? { ...c, status: 'pending' } : c))
+                    );
+                    for (const id of contactsMapRef.current.keys()) {
+                      const c = contactsMapRef.current.get(id);
+                      if (c && c.status === 'processing') {
+                        c.status = 'pending';
+                        if (!queueRef.current.includes(id)) {
+                          queueRef.current.unshift(id);
+                        }
+                      }
+                    }
+
                     showToast({
                       type: 'error',
                       title: 'No Active API Keys',
@@ -648,9 +668,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                   foundEmail = res.validEmail;
 
                   // Learn the company pattern for subsequent contacts
-                  if (domain && contact.firstName) {
+                  if (domain && (contact.firstName || contact.lastName)) {
                     const emailUser = res.validEmail.split('@')[0];
-                    const detectedPat = detectPattern(emailUser, contact.firstName, contact.lastName);
+                    const detectedPat = detectPattern(emailUser, contact.firstName || '', contact.lastName || '');
                     if (detectedPat) {
                       domainPatternCache.current.set(domain, detectedPat);
                       saveDomainCache();
@@ -732,6 +752,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                     break;
                   }
 
+                  if (res.isUnknown) {
+                    isUnknown = true;
+                    if (domain) {
+                      domainPatternCache.current.set(domain, 'UNKNOWN');
+                      saveDomainCache();
+                    }
+                    break;
+                  }
+
                   if (res.validEmail) {
                     foundEmail = res.validEmail;
                     isRoleFallback = true;
@@ -793,7 +822,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       } catch (fatalWorkerErr) {
         console.error('Fatal worker error:', fatalWorkerErr);
       } finally {
-        activeWorkersRef.current--;
+        activeWorkersRef.current = Math.max(0, activeWorkersRef.current - 1);
         if (activeWorkersRef.current <= 0 && runIdRef.current === currentRunId) {
           setIsProcessing(false);
           setEstimatedRemainingSec(null);
@@ -810,10 +839,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       1,
       keysRef.current.filter(k => k.status === 'active' || k.status === 'unchecked').length
     );
-    // In round-robin mode, 3 workers per active key multiplies throughput safely
+    // Respect user-configured concurrency while optimizing workers per active key
     const safeWorkerLimit =
       settings.keyStrategy === 'round_robin'
-        ? Math.min(activeKeyCount * 3, 15)
+        ? Math.min(settings.concurrency || 3, activeKeyCount * 3)
         : settings.concurrency;
 
     const workerCount = Math.min(safeWorkerLimit, pendingIds.length);

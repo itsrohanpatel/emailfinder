@@ -57,39 +57,59 @@ function generatePermutations(firstName, lastName, website, mode = 'near_full') 
   const f1 = f ? f[0] : '';
   const l1 = l ? l[0] : '';
 
-  // Single-Initial Smart Mode (e.g. Maggie W):
-  // Generate exactly 3 realistic patterns (maggie.w@, maggiew@, maggie@) with zero duplicates
-  if (l.length === 1) {
-    return Array.from(new Set([
+  let rawList = [];
+
+  if (f && l) {
+    // Single-Initial Smart Mode (e.g. Maggie W):
+    // Generate exactly 3 realistic patterns (maggie.w@, maggiew@, maggie@) with zero duplicates
+    if (l.length === 1) {
+      return Array.from(new Set([
+        `${f}.${l}@${d}`,
+        `${f}${l}@${d}`,
+        `${f}@${d}`
+      ]));
+    }
+
+    const top4 = [
+      `${f}@${d}`,
       `${f}.${l}@${d}`,
       `${f}${l}@${d}`,
-      `${f}@${d}`
-    ]));
+      `${f1}${l}@${d}`
+    ];
+
+    const next4 = [
+      `${l}@${d}`,
+      `${l}.${f}@${d}`,
+      `${f}_${l}@${d}`,
+      `${l}${f}@${d}`
+    ];
+
+    const extended = [
+      `${f1}.${l}@${d}`,
+      `${f}${l1}@${d}`,
+      `${f}.${l1}@${d}`,
+      `${l1}${f}@${d}`,
+      `${l1}.${f}@${d}`,
+      `${l}${f1}@${d}`,
+      `${l}.${f1}@${d}`,
+      `${f}-${l}@${d}`
+    ];
+
+    if (mode === 'lean') {
+      rawList = top4;
+    } else if (mode === 'exhaustive') {
+      rawList = [...top4, ...next4, ...extended];
+    } else {
+      rawList = [...top4, ...next4];
+    }
+  } else if (f) {
+    rawList = [`${f}@${d}`];
+  } else if (l) {
+    rawList = [`${l}@${d}`];
   }
 
-  let rawList = [];
-  if (mode === 'lean') {
-    rawList = [
-      l ? `${f}.${l}@${d}` : `${f}@${d}`,
-      l ? `${f1}${l}@${d}` : `${f}@${d}`,
-      `${f}@${d}`,
-      l ? `${f}${l}@${d}` : `${f}@${d}`,
-    ];
-  } else {
-    // Near-full (Top 8)
-    rawList = [
-      l ? `${f}.${l}@${d}` : `${f}@${d}`,
-      `${f}@${d}`,
-      l ? `${f1}${l}@${d}` : `${f}@${d}`,
-      l ? `${f}${l}@${d}` : `${f}@${d}`,
-      l ? `${f}_${l}@${d}` : `${f}@${d}`,
-      l ? `${f}.${l1}@${d}` : `${f}@${d}`,
-      l ? `${f}${l1}@${d}` : `${f}@${d}`,
-      l ? `${l}.${f}@${d}` : `${f}@${d}`,
-    ];
-  }
-
-  return Array.from(new Set(rawList));
+  const validEmailRegex = /^[a-z0-9]+([._-][a-z0-9]+)*@[a-z0-9-]+(\.[a-z0-9-]+)+$/;
+  return Array.from(new Set(rawList.filter(e => validEmailRegex.test(e))));
 }
 
 async function checkMx(domain) {
@@ -107,17 +127,22 @@ async function checkMx(domain) {
   }
 }
 
-// In-Memory Domain Cache
+// In-Memory Domain Cache & Shared Key Pool
 const domainCache = new Map();
+let activeKeys = [...keys];
 let keyIndex = 0;
 
-function getNextKey() {
+function markKeyExhausted(token) {
+  activeKeys = activeKeys.filter(k => k !== token);
+  console.warn(`[Cloud Runner] Key exhausted/invalid. ${activeKeys.length} active key(s) remaining.`);
+}
+
+function getNextKey(workerId = 0) {
+  if (activeKeys.length === 0) return null;
   if (keyStrategy === 'round_robin') {
-    const token = keys[keyIndex % keys.length];
-    keyIndex++;
-    return token;
+    return activeKeys[(workerId + keyIndex++) % activeKeys.length];
   }
-  return keys[0];
+  return activeKeys[0];
 }
 
 async function verifySingle(token, email) {
@@ -133,12 +158,20 @@ async function verifySingle(token, email) {
     });
 
     if (res.status === 429) return { isRateLimit: true };
+    if (res.status === 401 || res.status === 402 || res.status === 403) {
+      const errData = await res.json().catch(() => ({}));
+      const msg = String(errData?.error?.message || `HTTP ${res.status}`);
+      return { isExhausted: true, error: msg };
+    }
     if (!res.ok) {
       const errData = await res.json().catch(() => ({}));
       const msg = String(errData?.error?.message || `HTTP ${res.status}`);
       const lower = msg.toLowerCase();
       if (lower.includes('concurrent') || lower.includes('running too many') || lower.includes('rate limit')) {
         return { isRateLimit: true };
+      }
+      if (lower.includes('quota') || lower.includes('credits') || lower.includes('payment') || lower.includes('exhausted')) {
+        return { isExhausted: true, error: msg };
       }
       return { success: false, error: msg };
     }
@@ -170,13 +203,24 @@ async function run() {
   if (datasetId && keys.length > 0) {
     console.log(`[Cloud Runner] Loading contacts from Apify Dataset: ${datasetId}...`);
     try {
-      const res = await fetch(`https://api.apify.com/v2/datasets/${datasetId}/items?token=${keys[0]}&limit=50000`);
-      if (res.ok) {
-        contacts = await res.json();
-        console.log(`[Cloud Runner] Successfully loaded ${contacts.length} contacts from Apify Dataset.`);
-      } else {
-        console.warn(`[Cloud Runner] Apify Dataset fetch HTTP ${res.status}. Falling back to INPUT_CONTACTS.`);
+      let offset = 0;
+      let hasMore = true;
+      while (hasMore) {
+        const res = await fetch(`https://api.apify.com/v2/datasets/${datasetId}/items?token=${keys[0]}&offset=${offset}&limit=1000`);
+        if (!res.ok) {
+          console.warn(`[Cloud Runner] Apify Dataset fetch HTTP ${res.status}.`);
+          break;
+        }
+        const chunk = await res.json();
+        if (!Array.isArray(chunk) || chunk.length === 0) {
+          hasMore = false;
+        } else {
+          contacts.push(...chunk);
+          offset += chunk.length;
+          if (chunk.length < 1000) hasMore = false;
+        }
       }
+      console.log(`[Cloud Runner] Successfully loaded ${contacts.length} contacts from Apify Dataset.`);
     } catch (err) {
       console.warn(`[Cloud Runner] Error loading dataset: ${err.message}. Falling back.`);
     }
@@ -226,23 +270,33 @@ async function run() {
   console.log(`[Cloud Runner] Starting verification pool with ${concurrency} parallel workers (${WORKERS_PER_KEY} per Apify account)...`);
 
   async function worker(workerId) {
-    const assignedToken = keys[workerId % keys.length];
+    let currentToken = getNextKey(workerId);
 
     while (queue.length > 0) {
+      if (activeKeys.length === 0) {
+        console.error('[Cloud Runner] All Apify keys exhausted.');
+        break;
+      }
+
       const contact = queue.shift();
       if (!contact) break;
 
       const domain = normalizeDomain(contact.website || contact.domain || contact.company_domain || contact.Website || contact.Domain || '');
 
+      if (!domain || !domain.includes('.')) {
+        results.push({ ...contact, status: 'skipped_missing_info', email: '', lastError: 'Missing or invalid domain' });
+        pushStreamItem({ id: contact.id, status: 'skipped_missing_info', email: '', lastError: 'Missing or invalid domain' });
+        completed++;
+        continue;
+      }
+
       // 1. DNS Pre-Check
-      if (domain && domain.includes('.')) {
-        const hasMx = await checkMx(domain);
-        if (!hasMx) {
-          results.push({ ...contact, status: 'skipped_no_mx', email: '', lastError: 'No active MX records ($0)' });
-          pushStreamItem({ id: contact.id, status: 'skipped_no_mx', email: '', lastError: 'No active MX records ($0)' });
-          completed++;
-          continue;
-        }
+      const hasMx = await checkMx(domain);
+      if (!hasMx) {
+        results.push({ ...contact, status: 'skipped_no_mx', email: '', lastError: 'No active MX records ($0)' });
+        pushStreamItem({ id: contact.id, status: 'skipped_no_mx', email: '', lastError: 'No active MX records ($0)' });
+        completed++;
+        continue;
       }
 
       // 2. Domain Cache Check
@@ -260,10 +314,24 @@ async function run() {
         continue;
       }
 
-      // 3. Permutations
-      const fn = contact.firstName || contact.first_name || contact['First Name'] || '';
-      const ln = contact.lastName || contact.last_name || contact['Last Name'] || '';
-      const perms = generatePermutations(fn, ln, domain, patternMode);
+      // 3. Permutations with Whitespace & Honorific Normalization
+      let rawFn = (contact.firstName || contact.first_name || contact['First Name'] || '').trim();
+      let rawLn = (contact.lastName || contact.last_name || contact['Last Name'] || '').trim();
+
+      rawFn = rawFn.replace(/^(dr|mr|mrs|ms|prof)\.?\s+/i, '').replace(/\s+(phd|md|jr|sr|ii|iii|esq)\.?$/i, '').trim();
+      rawLn = rawLn.replace(/^(dr|mr|mrs|ms|prof)\.?\s+/i, '').replace(/\s+(phd|md|jr|sr|ii|iii|esq)\.?$/i, '').trim();
+
+      if (rawFn && !rawLn && rawFn.includes(' ')) {
+        const parts = rawFn.split(/\s+/);
+        rawFn = parts[0];
+        rawLn = parts.slice(1).join(' ');
+      } else if (rawLn && !rawFn && rawLn.includes(' ')) {
+        const parts = rawLn.split(/\s+/);
+        rawFn = parts[0];
+        rawLn = parts.slice(1).join(' ');
+      }
+
+      const perms = generatePermutations(rawFn, rawLn, domain, patternMode);
 
       let foundEmail = '';
       let isCatchAll = false;
@@ -275,10 +343,26 @@ async function run() {
         let done = false;
 
         while (retries < 5 && !done) {
-          const check = await verifySingle(assignedToken, candidate);
+          if (!currentToken) {
+            currentToken = getNextKey(workerId);
+            if (!currentToken) break;
+          }
+
+          const check = await verifySingle(currentToken, candidate);
 
           if (check.isRateLimit) {
             await new Promise(r => setTimeout(r, 2000 + Math.random() * 1500));
+            retries++;
+            continue;
+          }
+
+          if (check.isExhausted) {
+            markKeyExhausted(currentToken);
+            currentToken = getNextKey(workerId);
+            if (!currentToken) {
+              lastErr = 'All API keys exhausted';
+              break;
+            }
             retries++;
             continue;
           }
@@ -310,22 +394,34 @@ async function run() {
           }
         }
 
-        if (foundEmail || isCatchAll || isUnknown) break;
+        if (foundEmail || isCatchAll || isUnknown || activeKeys.length === 0) break;
       }
 
       let isRoleFallback = false;
 
       // Independent HR & Careers Fallback:
       // If personal permutations yield no match, verify hr@ and careers@ for this contact
-      if (enableRoleFallback && !foundEmail && !isCatchAll && !isUnknown && domain) {
+      if (enableRoleFallback && !foundEmail && !isCatchAll && !isUnknown && domain && activeKeys.length > 0) {
         const roleCandidates = [`hr@${domain}`, `careers@${domain}`];
         for (const roleEmail of roleCandidates) {
           let retries = 0;
           let done = false;
           while (retries < 4 && !done) {
-            const check = await verifySingle(assignedToken, roleEmail);
+            if (!currentToken) {
+              currentToken = getNextKey(workerId);
+              if (!currentToken) break;
+            }
+
+            const check = await verifySingle(currentToken, roleEmail);
             if (check.isRateLimit) {
               await new Promise(r => setTimeout(r, 2000 + Math.random() * 1000));
+              retries++;
+              continue;
+            }
+            if (check.isExhausted) {
+              markKeyExhausted(currentToken);
+              currentToken = getNextKey(workerId);
+              if (!currentToken) break;
               retries++;
               continue;
             }
@@ -346,7 +442,7 @@ async function run() {
               break;
             }
           }
-          if (foundEmail || isCatchAll) break;
+          if (foundEmail || isCatchAll || activeKeys.length === 0) break;
         }
       }
 
@@ -395,20 +491,24 @@ async function run() {
     }).catch(() => {});
   }
 
-  // Export Results
+  // Export Results in original input sequence with all user CSV columns preserved
   console.log('[Cloud Runner] All contacts processed. Exporting Excel & CSV...');
   const outDir = path.join(process.cwd(), 'output');
   if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
 
-  const exportRows = results.map(r => ({
-    FirstName: r.firstName || r['First Name'] || '',
-    LastName: r.lastName || r['Last Name'] || '',
-    Company: r.company || r.Company || '',
-    Domain: r.website || r.domain || r.Website || r.Domain || '',
-    VerifiedEmail: r.email || '',
-    Status: r.status,
-    LastError: r.lastError || '',
-  }));
+  results.sort((a, b) => (a.originalIndex ?? 0) - (b.originalIndex ?? 0));
+
+  const exportRows = results.map(r => {
+    const base = r.originalData ? { ...r.originalData } : { ...r };
+    delete base.originalIndex;
+    delete base.originalData;
+    return {
+      ...base,
+      VerifiedEmail: r.email || '',
+      VerificationStatus: r.status,
+      LastError: r.lastError || '',
+    };
+  });
 
   // CSV
   const headers = Object.keys(exportRows[0] || {}).join(',');

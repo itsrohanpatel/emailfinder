@@ -67,22 +67,22 @@ export function detectPattern(emailUser: string, firstName: string, lastName: st
   const f1 = f ? f[0] : '';
   const l1 = l ? l[0] : '';
 
-  if (u === f) return 'first';
-  if (l && u === `${f}.${l}`) return 'first.last';
-  if (l && u === `${f}${l}`) return 'firstlast';
-  if (l && u === `${f1}${l}`) return 'flast';
+  if (f && u === f) return 'first';
+  if (f && l && u === `${f}.${l}`) return 'first.last';
+  if (f.length > 1 && l && u === `${f}${l}`) return 'firstlast';
+  if (f1 && l && u === `${f1}${l}`) return 'flast';
   if (l && u === l) return 'last';
-  if (l && u === `${l}.${f}`) return 'last.first';
-  if (l && u === `${f}_${l}`) return 'first_last';
-  if (l && u === `${l}${f}`) return 'lastfirst';
-  if (l && u === `${f1}.${l}`) return 'f.last';
-  if (l && u === `${f}${l1}`) return 'firstl';
-  if (l && u === `${f}.${l1}`) return 'first.l';
-  if (l && u === `${l1}${f}`) return 'lfirst';
-  if (l && u === `${l1}.${f}`) return 'l.first';
-  if (l && u === `${l}${f1}`) return 'lastf';
-  if (l && u === `${l}.${f1}`) return 'last.f';
-  if (l && u === `${f}-${l}`) return 'first-last';
+  if (f && l && u === `${l}.${f}`) return 'last.first';
+  if (f && l && u === `${f}_${l}`) return 'first_last';
+  if (f && l && u === `${l}${f}`) return 'lastfirst';
+  if (f1 && l && u === `${f1}.${l}`) return 'f.last';
+  if (f && l1 && u === `${f}${l1}`) return 'firstl';
+  if (f && l1 && u === `${f}.${l1}`) return 'first.l';
+  if (l1 && f && u === `${l1}${f}`) return 'lfirst';
+  if (l1 && f && u === `${l1}.${f}`) return 'l.first';
+  if (l && f1 && u === `${l}${f1}`) return 'lastf';
+  if (l && f1 && u === `${l}.${f1}`) return 'last.f';
+  if (f && l && u === `${f}-${l}`) return 'first-last';
 
   return null;
 }
@@ -103,59 +103,59 @@ export function generateEmailByPattern(
   const f1 = f ? f[0] : '';
   const l1 = l ? l[0] : '';
 
-  let user = f;
+  let user = f || l;
 
   switch (pattern) {
     case 'first':
-      user = f;
+      user = f || l;
       break;
     case 'first.last':
-      user = l ? `${f}.${l}` : f;
+      user = (f && l) ? `${f}.${l}` : (f || l);
       break;
     case 'firstlast':
-      user = l ? `${f}${l}` : f;
+      user = (f && l) ? `${f}${l}` : (f || l);
       break;
     case 'flast':
-      user = l ? `${f1}${l}` : f;
+      user = (f1 && l) ? `${f1}${l}` : (f || l);
       break;
     case 'last':
-      user = l ? l : f;
+      user = l || f;
       break;
     case 'last.first':
-      user = l ? `${l}.${f}` : f;
+      user = (l && f) ? `${l}.${f}` : (l || f);
       break;
     case 'first_last':
-      user = l ? `${f}_${l}` : f;
+      user = (f && l) ? `${f}_${l}` : (f || l);
       break;
     case 'lastfirst':
-      user = l ? `${l}${f}` : f;
+      user = (l && f) ? `${l}${f}` : (l || f);
       break;
     case 'f.last':
-      user = l ? `${f1}.${l}` : f;
+      user = (f1 && l) ? `${f1}.${l}` : (f || l);
       break;
     case 'firstl':
-      user = l ? `${f}${l1}` : f;
+      user = (f && l1) ? `${f}${l1}` : (f || l);
       break;
     case 'first.l':
-      user = l ? `${f}.${l1}` : f;
+      user = (f && l1) ? `${f}.${l1}` : (f || l);
       break;
     case 'lfirst':
-      user = l ? `${l1}${f}` : f;
+      user = (l1 && f) ? `${l1}${f}` : (l || f);
       break;
     case 'l.first':
-      user = l ? `${l1}.${f}` : f;
+      user = (l1 && f) ? `${l1}.${f}` : (l || f);
       break;
     case 'lastf':
-      user = l ? `${l}${f1}` : f;
+      user = (l && f1) ? `${l}${f1}` : (l || f);
       break;
     case 'last.f':
-      user = l ? `${l}.${f1}` : f;
+      user = (l && f1) ? `${l}.${f1}` : (l || f);
       break;
     case 'first-last':
-      user = l ? `${f}-${l}` : f;
+      user = (f && l) ? `${f}-${l}` : (f || l);
       break;
     default:
-      user = l ? `${f}.${l}` : f;
+      user = (f && l) ? `${f}.${l}` : (f || l);
   }
 
   return `${user}@${normDomain}`;
@@ -189,6 +189,10 @@ export function generatePermutations(
 
   let rawFn = (firstName || '').trim();
   let rawLn = (lastName || '').trim();
+
+  // Strip common honorifics & suffixes before splitting on whitespace
+  rawFn = rawFn.replace(/^(dr|mr|mrs|ms|prof)\.?\s+/i, '').replace(/\s+(phd|md|jr|sr|ii|iii|esq)\.?$/i, '').trim();
+  rawLn = rawLn.replace(/^(dr|mr|mrs|ms|prof)\.?\s+/i, '').replace(/\s+(phd|md|jr|sr|ii|iii|esq)\.?$/i, '').trim();
 
   // Split full name if entered only in first name
   if (rawFn && !rawLn && rawFn.includes(' ')) {

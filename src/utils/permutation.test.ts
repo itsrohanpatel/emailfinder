@@ -95,6 +95,19 @@ describe('detectPattern & generateEmailByPattern', () => {
     expect(detectPattern('shivanibajaj', 'Shivani', 'Bajaj')).toBe('firstlast');
     expect(detectPattern('bajaj', 'Shivani', 'Bajaj')).toBe('last');
     expect(detectPattern('bajaj.shivani', 'Shivani', 'Bajaj')).toBe('last.first');
+    expect(detectPattern('smith', '', 'Smith')).toBe('last');
+    expect(detectPattern('jsmith', 'J', 'Smith')).toBe('flast');
+  });
+
+  it('handles missing first or last name in generateEmailByPattern safely without leading dots', () => {
+    expect(generateEmailByPattern('', 'Smith', 'example.com', 'first.last')).toBe('smith@example.com');
+    expect(generateEmailByPattern('John', '', 'example.com', 'first.last')).toBe('john@example.com');
+  });
+
+  it('handles honorifics and full name in single name field safely', () => {
+    const list = generatePermutations('Dr. John Doe', '', 'example.com', undefined, 'lean');
+    expect(list).toContain('john.doe@example.com');
+    expect(list).toContain('john@example.com');
   });
 
   it('generates email string deterministically from pattern', () => {

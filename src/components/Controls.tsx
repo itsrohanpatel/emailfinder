@@ -41,7 +41,7 @@ export function Controls() {
 
   const [showPreFlight, setShowPreFlight] = useState(false);
   const [isDispatchingCloud, setIsDispatchingCloud] = useState(false);
-  const [githubRepoInput, setGithubRepoInput] = useState(settings.githubRepo || 'itsrohanpatel/emailfinder');
+  const [githubRepoInput, setGithubRepoInput] = useState(settings.githubRepo || '');
   const [githubTokenInput, setGithubTokenInput] = useState(settings.githubToken || '');
 
   useEffect(() => {
@@ -553,7 +553,7 @@ export function Controls() {
           className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100/80 border border-emerald-200 text-emerald-800 text-xs font-semibold transition-all shadow-2xs active:scale-[0.98] cursor-pointer"
         >
           <Download className="w-3.5 h-3.5 text-emerald-600" />
-          <span>Export Deliverable ({found})</span>
+          <span>Export Deliverable ({found + roleFound})</span>
         </button>
 
         <button
