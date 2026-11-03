@@ -200,6 +200,7 @@ export function Controls() {
               pattern_mode: settings.patternMode,
               key_strategy: settings.keyStrategy,
               enable_role_fallback: String(settings.enableRoleFallback !== false),
+              threads_per_account: String(settings.threadsPerAccount || 4),
             },
           }),
         }

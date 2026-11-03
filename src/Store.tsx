@@ -145,14 +145,12 @@ function loadInitialSettings(): Settings {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (parsed && typeof parsed.concurrency === 'number') {
-        // Migrate legacy 10 or excessive concurrency to safe Apify cap 3
-        const safeConcurrency =
-          parsed.concurrency > 5 || parsed.concurrency === 10
-            ? 3
-            : Math.max(1, parsed.concurrency);
+        const threadsPerAccount = Math.min(4, Math.max(1, parsed.threadsPerAccount ?? 4));
+        const safeConcurrency = Math.min(32, Math.max(1, parsed.concurrency ?? 12));
 
         return {
           concurrency: safeConcurrency,
+          threadsPerAccount,
           delayMs: Math.max(0, parsed.delayMs ?? 300),
           reverifyAll: Boolean(parsed.reverifyAll),
           enableDnsPreCheck: parsed.enableDnsPreCheck ?? true,
@@ -170,7 +168,8 @@ function loadInitialSettings(): Settings {
   }
 
   return {
-    concurrency: 3,
+    concurrency: 12,
+    threadsPerAccount: 4,
     delayMs: 300,
     reverifyAll: false,
     enableDnsPreCheck: true,
@@ -424,11 +423,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const roundRobinKeyIndexRef = useRef<number>(0);
 
-  const getNextActiveKey = useCallback((): ApiKey | null => {
+  const getNextActiveKey = useCallback((workerId?: number): ApiKey | null => {
     const active = keysRef.current.filter(k => k.status === 'active' || k.status === 'unchecked');
     if (active.length === 0) return null;
 
     if (settings.keyStrategy === 'round_robin') {
+      if (workerId !== undefined) {
+        return active[workerId % active.length];
+      }
       const idx = Math.abs(roundRobinKeyIndexRef.current++) % active.length;
       return active[idx];
     } else {
@@ -479,7 +481,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const startTime = Date.now();
     activeWorkersRef.current = 0;
 
-    const worker = async () => {
+    const worker = async (workerId: number = 0) => {
       activeWorkersRef.current++;
 
       try {
@@ -596,11 +598,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               let candidateDone = false;
 
               while (retries < 5 && !candidateDone && runIdRef.current === currentRunId) {
-                const activeKey = getNextActiveKey();
+                const activeKey = getNextActiveKey(workerId);
                 if (!activeKey) {
                   // Wait up to 2 seconds before pausing in case key availability updates
                   await new Promise(r => setTimeout(r, 1500));
-                  const retryKey = getNextActiveKey();
+                  const retryKey = getNextActiveKey(workerId);
                   if (!retryKey && runIdRef.current === currentRunId) {
                     runIdRef.current++;
                     setIsPaused(true);
@@ -730,7 +732,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 let roleDone = false;
 
                 while (roleRetries < 5 && !roleDone && runIdRef.current === currentRunId) {
-                  const activeKey = getNextActiveKey();
+                  const activeKey = getNextActiveKey(workerId);
                   if (!activeKey) break;
 
                   const res = await verifyEmails(activeKey.token, [roleEmail]);
@@ -848,15 +850,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       1,
       keysRef.current.filter(k => k.status === 'active' || k.status === 'unchecked').length
     );
-    // Respect user-configured concurrency while optimizing workers per active key
+    const threadsPerKey = Math.min(4, Math.max(1, settings.threadsPerAccount ?? 4));
+
+    // When round-robin is active, scale total parallel workers across all active accounts (e.g. 6 accounts * 4 threads = 24 workers)
     const safeWorkerLimit =
       settings.keyStrategy === 'round_robin'
-        ? Math.min(settings.concurrency || 3, activeKeyCount * 3)
-        : settings.concurrency;
+        ? Math.min(activeKeyCount * threadsPerKey, 32)
+        : Math.min(threadsPerKey, 4);
 
     const workerCount = Math.min(safeWorkerLimit, pendingIds.length);
     for (let i = 0; i < workerCount; i++) {
-      worker();
+      worker(i);
     }
   }, [
     contacts,

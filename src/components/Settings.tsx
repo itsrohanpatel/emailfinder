@@ -8,9 +8,18 @@ export function SettingsPanel() {
     settings,
     setSettings,
     isProcessing,
+    apiKeys,
     learnedDomainsCount,
     clearDomainCache,
   } = useAppStore();
+
+  const activeKeyCount = Math.max(
+    1,
+    (apiKeys || []).filter(k => k.status === 'active' || k.status === 'unchecked').length
+  );
+  const threadsPerKey = Math.min(4, Math.max(1, settings.threadsPerAccount ?? 4));
+  const totalEffectiveWorkers =
+    settings.keyStrategy === 'round_robin' ? activeKeyCount * threadsPerKey : threadsPerKey;
 
   return (
     <section>
@@ -102,55 +111,54 @@ export function SettingsPanel() {
           </button>
         </div>
 
-        {/* Concurrency Slider */}
+        {/* Multi-Account Parallel Concurrency */}
         <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-2xs">
           <div className="flex justify-between items-center mb-1.5">
             <label className="text-xs font-semibold text-slate-800 flex items-center gap-1">
               <Cpu className="w-3.5 h-3.5 text-blue-600" />
-              <span>Parallel Workers</span>
+              <span>Threads Per Account</span>
             </label>
             <span className="text-xs font-mono font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200/60 tabular-nums">
-              {settings.concurrency} {settings.concurrency === 1 ? 'thread' : 'threads'}
+              {threadsPerKey} / account
             </span>
           </div>
-          <input
-            type="range"
-            className="w-full accent-blue-600 cursor-pointer"
-            value={Math.min(5, settings.concurrency)}
-            min="1"
-            max="5"
-            disabled={isProcessing}
-            onChange={e =>
-              setSettings(s => ({
-                ...s,
-                concurrency: Math.min(5, Math.max(1, parseInt(e.target.value) || 1)),
-              }))
-            }
-          />
-          <div className="flex justify-between text-[10px] text-slate-400 font-mono mt-1">
-            <span>1 worker</span>
-            <span>3 (optimum)</span>
-            <span>5 max (Apify cap)</span>
-          </div>
-          <div className="flex gap-1.5 mt-2">
-            {[1, 3, 5].map(cnt => (
+
+          <div className="grid grid-cols-4 gap-1.5 mt-2">
+            {[1, 2, 3, 4].map(cnt => (
               <button
                 key={cnt}
                 type="button"
                 disabled={isProcessing}
-                onClick={() => setSettings(s => ({ ...s, concurrency: cnt }))}
-                className={`flex-1 py-1 rounded-md text-[10px] font-mono font-medium border transition-all cursor-pointer ${
-                  settings.concurrency === cnt
-                    ? 'bg-blue-50 text-blue-700 border-blue-300 font-bold'
+                onClick={() =>
+                  setSettings(s => ({
+                    ...s,
+                    threadsPerAccount: cnt,
+                    concurrency: activeKeyCount * cnt,
+                  }))
+                }
+                className={`py-1.5 rounded-md text-[10px] font-mono font-medium border transition-all cursor-pointer text-center ${
+                  threadsPerKey === cnt
+                    ? 'bg-blue-600 text-white border-blue-600 font-bold shadow-xs'
                     : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
                 }`}
               >
-                {cnt} {cnt === 3 ? '★ Recommended' : cnt === 5 ? 'Max Cap' : 'Thread'}
+                {cnt} {cnt === 4 ? '★ Max (4x)' : cnt === 3 ? 'Fast' : `${cnt}x`}
               </button>
             ))}
           </div>
+
+          {/* Live Multiplier Badge */}
+          <div className="mt-2.5 p-2 rounded-lg bg-indigo-50/80 border border-indigo-100 flex items-center justify-between text-[11px]">
+            <span className="text-indigo-950 font-medium">
+              <b>{activeKeyCount}</b> account{activeKeyCount > 1 ? 's' : ''} × <b>{threadsPerKey}</b> threads =
+            </span>
+            <span className="font-mono font-bold text-indigo-700 bg-white px-2 py-0.5 rounded border border-indigo-200 shadow-2xs">
+              ⚡ {totalEffectiveWorkers} Parallel Workers
+            </span>
+          </div>
+
           <span className="text-[10px] text-slate-400 mt-1.5 block leading-tight">
-            Apify enforces a 5 concurrent run cap. 3 threads prevents 429 rate limits and runs with zero stalls.
+            Apify enforces a 5 concurrent run cap per account. Running 4 threads per account utilizes 80% capacity safely across all keys with zero rate limits.
           </span>
         </div>
 

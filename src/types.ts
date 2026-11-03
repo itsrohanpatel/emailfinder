@@ -39,6 +39,7 @@ export interface Settings {
   keyStrategy: 'failover' | 'round_robin';
   executionTarget: 'local' | 'github_cloud';
   enableRoleFallback?: boolean;
+  threadsPerAccount?: number;
   githubToken?: string;
   githubRepo?: string;
 }

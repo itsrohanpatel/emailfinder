@@ -38,6 +38,11 @@ on:
         required: false
         default: 'true'
         type: string
+      threads_per_account:
+        description: 'Number of parallel threads per Apify account (1 to 4)'
+        required: false
+        default: '4'
+        type: string
 
 jobs:
   verify:
@@ -67,6 +72,7 @@ jobs:
           INPUT_DATASET_ID: ${{ inputs.dataset_id }}
           INPUT_RESULTS_DATASET_ID: ${{ inputs.results_dataset_id }}
           INPUT_ENABLE_ROLE_FALLBACK: ${{ inputs.enable_role_fallback }}
+          INPUT_THREADS_PER_ACCOUNT: ${{ inputs.threads_per_account }}
         run: node scripts/cloud_verify.cjs
 
       - name: Upload Verified Results Artifact

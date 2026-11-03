@@ -14,6 +14,7 @@ const keyStrategy = process.env.INPUT_KEY_STRATEGY || 'round_robin';
 const datasetId = process.env.INPUT_DATASET_ID || '';
 const resultsDatasetId = process.env.INPUT_RESULTS_DATASET_ID || '';
 const enableRoleFallback = (process.env.INPUT_ENABLE_ROLE_FALLBACK || 'true').toLowerCase() !== 'false';
+const threadsPerAccount = Math.min(4, Math.max(1, parseInt(process.env.INPUT_THREADS_PER_ACCOUNT || '4')));
 
 const keys = rawKeys
   .split(';')
@@ -264,10 +265,10 @@ async function run() {
   }
 
   const queue = contacts.map((c, idx) => ({ ...c, originalIndex: idx }));
-  const WORKERS_PER_KEY = 2; // Strict cap of 2 concurrent workers per Apify account (prevents ever hitting 5 cap)
-  const concurrency = Math.min(keys.length * WORKERS_PER_KEY, 12);
+  const WORKERS_PER_KEY = threadsPerAccount;
+  const concurrency = Math.min(keys.length * WORKERS_PER_KEY, 32);
 
-  console.log(`[Cloud Runner] Starting verification pool with ${concurrency} parallel workers (${WORKERS_PER_KEY} per Apify account)...`);
+  console.log(`[Cloud Runner] Starting verification pool with ${concurrency} parallel workers (${WORKERS_PER_KEY} per Apify account across ${keys.length} accounts)...`);
 
   async function worker(workerId) {
     let currentToken = getNextKey(workerId);

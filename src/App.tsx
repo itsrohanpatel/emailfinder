@@ -21,8 +21,27 @@ function formatRemainingTime(seconds: number | null, isProcessing: boolean): str
 }
 
 function AppContent() {
-  const { isProcessing, isCloudRunning, isPaused, contacts, estimatedRemainingSec, toasts, dismissToast, settings } =
-    useAppStore();
+  const {
+    isProcessing,
+    isCloudRunning,
+    isPaused,
+    contacts,
+    estimatedRemainingSec,
+    apiKeys,
+    toasts,
+    dismissToast,
+    settings,
+  } = useAppStore();
+
+  const activeKeyCount = Math.max(
+    1,
+    (apiKeys || []).filter(k => k.status === 'active' || k.status === 'unchecked').length
+  );
+  const threadsPerKey = Math.min(4, Math.max(1, settings.threadsPerAccount ?? 4));
+  const effectiveWorkers =
+    settings.keyStrategy === 'round_robin'
+      ? activeKeyCount * threadsPerKey
+      : threadsPerKey;
   const [activeTab, setActiveTab] = useState<'single' | 'bulk'>(() => {
     try {
       const saved = localStorage.getItem('veriflow_active_tab_v1');
@@ -184,7 +203,12 @@ function AppContent() {
         <div className="flex gap-4 text-[11px] font-mono text-slate-500">
           <span className="flex items-center gap-1">
             <Cpu className="w-3 h-3 text-slate-400" />
-            WORKERS: <b className="text-slate-700">{isCloudRunning ? 'Cloud Pool' : settings.concurrency}</b>
+            WORKERS:{' '}
+            <b className="text-slate-700">
+              {isCloudRunning
+                ? `Cloud (${Math.min(activeKeyCount * threadsPerKey, 32)})`
+                : `${effectiveWorkers} (${activeKeyCount} acc${activeKeyCount > 1 ? 's' : ''})`}
+            </b>
           </span>
           <span>
             ETA:{' '}
